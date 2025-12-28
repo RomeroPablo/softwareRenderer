@@ -58,7 +58,13 @@ struct state{
     SDL_Renderer* sdlRenderer;
     SDL_Texture* sdlTexture;
     bool running = true;
-    float move_x{1}, move_y{1};
+    bool up = false;
+    bool down = false;
+    bool left = false;
+    bool right = false;
+    struct{
+        int x;
+    } mvp ;
 }typedef state_t;
 
 void line(int ax, int ay, int bx, int by, TGAImage &framebuffer, TGAColor color) {
@@ -73,33 +79,31 @@ void line(int ax, int ay, int bx, int by, TGAImage &framebuffer, TGAColor color)
     else     <% for(size_t x=ax; x<=bx; x++, y+=f) framebuffer.set(x, y, color); %>
 }
 
-inline double hP(double x, int den, float shift){ return (x + shift) * WIDTH  /den; }
-inline double vP(double y, int den, float shift){ return (y + shift) * HEIGHT /den; }
+inline double hP(double x){ return (x + 1.) * WIDTH  /2; } // if a -0.1, if d + 0.1
+inline double vP(double y){ return (1. - y) * HEIGHT /2; } // if w -0.1, if s + 0.1
 
 void drawModel(state_t& state, TGAImage& framebuffer, const model_t& model){
-    static int den = 1;
-    den = (den > 10) ? den = 1 : den = den + 1;
-    float shiftX = state.move_x;
-    float shiftY = state.move_y;
     for(const auto& f : model.faces){
-        double ax = hP(model.vertices[f.a-1].x, den, shiftX), ay = vP(model.vertices[f.a-1].y, den, shiftY);
-        double bx = hP(model.vertices[f.b-1].x, den, shiftX), by = vP(model.vertices[f.b-1].y, den, shiftY);
-        double cx = hP(model.vertices[f.c-1].x, den, shiftX), cy = vP(model.vertices[f.c-1].y, den, shiftY);
+        double ax = hP(model.vertices[f.a-1].x), ay = vP(model.vertices[f.a-1].y);
+        double bx = hP(model.vertices[f.b-1].x), by = vP(model.vertices[f.b-1].y);
+        double cx = hP(model.vertices[f.c-1].x), cy = vP(model.vertices[f.c-1].y);
         line(ax, ay, bx, by, framebuffer, blue);
         line(cx, cy, bx, by, framebuffer, green);
-        line(cx, cy, ax, ay, framebuffer, yellow);
         line(ax, ay, cx, cy, framebuffer, red);
     }
 }
 
-void showFramebuffer(state_t& state, const TGAImage& fb) {
+void getInput(state_t& state){
     SDL_Event e; SDL_PollEvent(&e);
     if (e.type == SDL_QUIT || (e.type == SDL_KEYDOWN && e.key.keysym.sym == SDLK_ESCAPE)) state.running = false;
-
     const Uint8* keys = SDL_GetKeyboardState(nullptr);
-    //state.move_x = (keys[SDL_SCANCODE_D] - keys[SDL_SCANCODE_A]); // +1 right, -1 left
-    //state.move_y = (keys[SDL_SCANCODE_W] - keys[SDL_SCANCODE_S]); // +1 up, -1 down
+    state.up    = keys[SDL_SCANCODE_W];
+    state.down  = keys[SDL_SCANCODE_S];
+    state.left  = keys[SDL_SCANCODE_A];
+    state.right = keys[SDL_SCANCODE_D];
+}
 
+void showFramebuffer(state_t& state, const TGAImage& fb) {
     SDL_UpdateTexture(state.sdlTexture, nullptr, fb.getData(), fb.width() * fb.bytesPerPixel());
     SDL_RenderClear(state.sdlRenderer);
     SDL_RenderCopy(state.sdlRenderer, state.sdlTexture, nullptr, nullptr);
@@ -122,12 +126,14 @@ int main(int argc, char** argv) {
         s = std::chrono::high_resolution_clock::now();
 
         framebuffer.clear_fb();
+        getInput(state);
         drawModel(state, framebuffer, model);
         showFramebuffer(state, framebuffer);
 
         e = std::chrono::high_resolution_clock::now();
     }
 
+    framebuffer.flip_vertically();
     framebuffer.write_tga_file("framebuffer.tga");
 
     SDL_DestroyTexture(state.sdlTexture);
