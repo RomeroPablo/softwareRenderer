@@ -1,0 +1,139 @@
+#include <SDL2/SDL_video.h>
+#include <cassert>
+#include <cmath>
+#include <chrono>
+#include <fstream>
+#include <iomanip>
+#include <string>
+#include <sstream>
+#include <utility>
+#include <iostream>
+#include <SDL2/SDL.h>
+#include "tgaimage.h"
+
+#define PATH "../assets/demon.obj"
+#define WIDTH 640
+#define HEIGHT 480
+
+constexpr TGAColor 
+    white  = {255, 255, 255, 255}, 
+    green  = {  0, 255,   0, 255}, 
+    red    = {  0,   0, 255, 255}, 
+    blue   = {255, 128,  64, 255}, 
+    yellow = {  0, 200, 255, 255};
+
+struct vCoord { float x{}, y{}, z{};  } typedef vCoord_t;
+struct face   { size_t a{}, b{}, c{}; } typedef face_t;
+struct model {
+    model(std::string path){
+        std::ifstream file(path);
+        if(!file) std::cout << "Model Not Found" << std::endl;
+        std::string line;
+        while(std::getline(file, line)){
+            std::istringstream iss(line);
+            std::string tag;
+            iss >> tag;
+
+            if(tag == "v"){
+                float x, y, z;
+                iss >> x >> y >> z;
+                vertices.emplace_back((vCoord_t){x, y, z});
+            } else 
+
+            if (tag == "f"){
+                size_t a, b, c;
+                iss >> a;
+                iss.ignore(std::numeric_limits<std::streamsize>::max(), ' '); iss >> b;
+                iss.ignore(std::numeric_limits<std::streamsize>::max(), ' '); iss >> c;
+                faces.emplace_back((face_t){a, b, c});
+            }
+        }
+    }
+    std::vector<vCoord_t> vertices;
+    std::vector<face_t> faces;
+} typedef model_t;
+
+struct state{
+    SDL_Window* sdlWindow;
+    SDL_Renderer* sdlRenderer;
+    SDL_Texture* sdlTexture;
+    bool running = true;
+    float move_x{1}, move_y{1};
+}typedef state_t;
+
+void line(int ax, int ay, int bx, int by, TGAImage &framebuffer, TGAColor color) {
+    bool steep = std::abs (ax-bx) < std::abs(ay-by);
+    if(steep) <% std::swap(ax, ay); std::swap(bx, by); %>
+    if(ax>bx) <% std::swap(ax, bx); std::swap(ay, by); %>
+
+    float y = ay;
+    const float f = (by-ay) / static_cast<float>(bx-ax);
+
+    if(steep)<% for(size_t x=ax; x<=bx; x++, y+=f) framebuffer.set(y, x, color); %>
+    else     <% for(size_t x=ax; x<=bx; x++, y+=f) framebuffer.set(x, y, color); %>
+}
+
+inline double hP(double x, int den, float shift){ return (x + shift) * WIDTH  /den; }
+inline double vP(double y, int den, float shift){ return (y + shift) * HEIGHT /den; }
+
+void drawModel(state_t& state, TGAImage& framebuffer, const model_t& model){
+    static int den = 1;
+    den = (den > 10) ? den = 1 : den = den + 1;
+    float shiftX = state.move_x;
+    float shiftY = state.move_y;
+    for(const auto& f : model.faces){
+        double ax = hP(model.vertices[f.a-1].x, den, shiftX), ay = vP(model.vertices[f.a-1].y, den, shiftY);
+        double bx = hP(model.vertices[f.b-1].x, den, shiftX), by = vP(model.vertices[f.b-1].y, den, shiftY);
+        double cx = hP(model.vertices[f.c-1].x, den, shiftX), cy = vP(model.vertices[f.c-1].y, den, shiftY);
+        line(ax, ay, bx, by, framebuffer, blue);
+        line(cx, cy, bx, by, framebuffer, green);
+        line(cx, cy, ax, ay, framebuffer, yellow);
+        line(ax, ay, cx, cy, framebuffer, red);
+    }
+}
+
+void showFramebuffer(state_t& state, const TGAImage& fb) {
+    SDL_Event e; SDL_PollEvent(&e);
+    if (e.type == SDL_QUIT || (e.type == SDL_KEYDOWN && e.key.keysym.sym == SDLK_ESCAPE)) state.running = false;
+
+    const Uint8* keys = SDL_GetKeyboardState(nullptr);
+    //state.move_x = (keys[SDL_SCANCODE_D] - keys[SDL_SCANCODE_A]); // +1 right, -1 left
+    //state.move_y = (keys[SDL_SCANCODE_W] - keys[SDL_SCANCODE_S]); // +1 up, -1 down
+
+    SDL_UpdateTexture(state.sdlTexture, nullptr, fb.getData(), fb.width() * fb.bytesPerPixel());
+    SDL_RenderClear(state.sdlRenderer);
+    SDL_RenderCopy(state.sdlRenderer, state.sdlTexture, nullptr, nullptr);
+    SDL_RenderPresent(state.sdlRenderer);
+    SDL_Delay(7); // ~60 FPS
+}
+
+int main(int argc, char** argv) {
+    model_t model(PATH);
+    TGAImage framebuffer(WIDTH, HEIGHT, TGAImage::RGB);
+    state_t state;
+    SDL_Init(SDL_INIT_VIDEO);
+    state.sdlWindow    = SDL_CreateWindow("trr", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, WIDTH, HEIGHT, 0);
+    state.sdlRenderer  = SDL_CreateRenderer(state.sdlWindow, -1, SDL_RENDERER_ACCELERATED);
+    state.sdlTexture   = SDL_CreateTexture(state.sdlRenderer, SDL_PIXELFORMAT_BGR24, SDL_TEXTUREACCESS_STREAMING, framebuffer.width(), framebuffer.height());
+
+    std::chrono::time_point<std::chrono::high_resolution_clock> s<%%>, e<%%>;
+    while(state.running){
+        std::cout << '\r' << "ft: " << std::chrono::duration_cast<std::chrono::microseconds>(e-s).count() << " μS" << std::flush;
+        s = std::chrono::high_resolution_clock::now();
+
+        framebuffer.clear_fb();
+        drawModel(state, framebuffer, model);
+        showFramebuffer(state, framebuffer);
+
+        e = std::chrono::high_resolution_clock::now();
+    }
+
+    framebuffer.write_tga_file("framebuffer.tga");
+
+    SDL_DestroyTexture(state.sdlTexture);
+    SDL_DestroyRenderer(state.sdlRenderer);
+    SDL_DestroyWindow(state.sdlWindow);
+    SDL_Quit();
+
+    return 0;
+}

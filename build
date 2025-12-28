@@ -1,0 +1,18 @@
+#!/bin/sh
+if [ "$1" = "clean" ]; then
+    rm -rf artifacts
+    exit 0
+fi
+
+mkdir -p artifacts
+
+if [ artifacts/app -ot main.cpp ]; then
+    echo "compiling ..."
+    g++ -O3 main.cpp tgaimage.cpp $(sdl2-config --cflags --libs) -o artifacts/app
+fi
+
+cd artifacts 
+./app
+magick framebuffer.tga framebuffer.png
+kitty +kitten icat framebuffer.png
+cd ..
