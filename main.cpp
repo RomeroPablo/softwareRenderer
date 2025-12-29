@@ -7,20 +7,46 @@
 #include <string>
 #include <sstream>
 #include <utility>
+#include <vector>
 #include <iostream>
 #include <SDL2/SDL.h>
-#include "tgaimage.h"
 
 #define PATH "../assets/demon.obj"
 #define WIDTH 640
 #define HEIGHT 480
 
-constexpr TGAColor 
+struct color {
+    std::uint8_t bgra[4] = {0,0,0,0};
+    std::uint8_t bytespp = 4;
+    std::uint8_t& operator[](const int i) { return bgra[i]; }
+    const std::uint8_t& operator[](const int i) const { return bgra[i]; }
+}typedef color_t;
+
+constexpr color_t
     white  = {255, 255, 255, 255}, 
     green  = {  0, 255,   0, 255}, 
     red    = {  0,   0, 255, 255}, 
     blue   = {255, 128,  64, 255}, 
     yellow = {  0, 200, 255, 255};
+
+struct framebuffer{
+    enum format { GRAYSCALE=1, RGB=3, RGBA=4 };
+    framebuffer(int w, int h, int bpp) : w(w), h(h), bpp(bpp), data(w*h*bpp, 0) {
+        for (int j=0; j<h; j++)
+            for (int i=0; i<w; i++)
+                set(i, j, {});
+    }
+    void set(int x, int y, const color_t& c){
+        if (!data.size() || x<0 || y<0 || x>=w || y>=h) return;
+        memcpy(data.data()+(x+y*w)*bpp, c.bgra, bpp);
+    }
+    void clear(){ std::fill(data.begin(), data.end(), 0); }
+
+    int w;
+    int h;
+    int bpp = 0;
+    std::vector<uint8_t> data = {};
+} typedef framebuffer_t;
 
 struct vCoord { float x{}, y{}, z{};  } typedef vCoord_t;
 struct face   { size_t a{}, b{}, c{}; } typedef face_t;
@@ -67,7 +93,7 @@ struct state{
     } mvp ;
 }typedef state_t;
 
-void line(int ax, int ay, int bx, int by, TGAImage &framebuffer, TGAColor color) {
+void line(int ax, int ay, int bx, int by, framebuffer_t &framebuffer, color_t color) {
     bool steep = std::abs (ax-bx) < std::abs(ay-by);
     if(steep) <% std::swap(ax, ay); std::swap(bx, by); %>
     if(ax>bx) <% std::swap(ax, bx); std::swap(ay, by); %>
@@ -82,7 +108,7 @@ void line(int ax, int ay, int bx, int by, TGAImage &framebuffer, TGAColor color)
 inline double hP(double x){ return (x + 1.) * WIDTH  /2; } // if a -0.1, if d + 0.1
 inline double vP(double y){ return (1. - y) * HEIGHT /2; } // if w -0.1, if s + 0.1
 
-void drawModel(state_t& state, TGAImage& framebuffer, const model_t& model){
+void drawModel(state_t& state, framebuffer_t& framebuffer, const model_t& model){
     for(const auto& f : model.faces){
         double ax = hP(model.vertices[f.a-1].x), ay = vP(model.vertices[f.a-1].y);
         double bx = hP(model.vertices[f.b-1].x), by = vP(model.vertices[f.b-1].y);
@@ -103,38 +129,36 @@ void getInput(state_t& state){
     state.right = keys[SDL_SCANCODE_D];
 }
 
-void showFramebuffer(state_t& state, const TGAImage& fb) {
-    SDL_UpdateTexture(state.sdlTexture, nullptr, fb.getData(), fb.width() * fb.bytesPerPixel());
+void showFramebuffer(state_t& state, const framebuffer_t& fb) {
+    SDL_UpdateTexture(state.sdlTexture, nullptr, fb.data.data(), fb.w * fb.bpp);
     SDL_RenderClear(state.sdlRenderer);
     SDL_RenderCopy(state.sdlRenderer, state.sdlTexture, nullptr, nullptr);
     SDL_RenderPresent(state.sdlRenderer);
     SDL_Delay(7); // ~60 FPS
 }
 
+
 int main(int argc, char** argv) {
     model_t model(PATH);
-    TGAImage framebuffer(WIDTH, HEIGHT, TGAImage::RGB);
+    framebuffer_t framebuffer(WIDTH, HEIGHT, framebuffer::RGB);
     state_t state;
     SDL_Init(SDL_INIT_VIDEO);
     state.sdlWindow    = SDL_CreateWindow("trr", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, WIDTH, HEIGHT, 0);
     state.sdlRenderer  = SDL_CreateRenderer(state.sdlWindow, -1, SDL_RENDERER_ACCELERATED);
-    state.sdlTexture   = SDL_CreateTexture(state.sdlRenderer, SDL_PIXELFORMAT_BGR24, SDL_TEXTUREACCESS_STREAMING, framebuffer.width(), framebuffer.height());
+    state.sdlTexture   = SDL_CreateTexture(state.sdlRenderer, SDL_PIXELFORMAT_BGR24, SDL_TEXTUREACCESS_STREAMING, framebuffer.w, framebuffer.h);
 
     std::chrono::time_point<std::chrono::high_resolution_clock> s<%%>, e<%%>;
     while(state.running){
         std::cout << '\r' << "ft: " << std::chrono::duration_cast<std::chrono::microseconds>(e-s).count() << " μS" << std::flush;
         s = std::chrono::high_resolution_clock::now();
 
-        framebuffer.clear_fb();
+        framebuffer.clear();
         getInput(state);
         drawModel(state, framebuffer, model);
         showFramebuffer(state, framebuffer);
 
         e = std::chrono::high_resolution_clock::now();
-    }
-
-    framebuffer.flip_vertically();
-    framebuffer.write_tga_file("framebuffer.tga");
+    } std::cout << std::endl << std::flush;
 
     SDL_DestroyTexture(state.sdlTexture);
     SDL_DestroyRenderer(state.sdlRenderer);
