@@ -13,6 +13,4 @@ fi
 
 cd artifacts 
 ./app
-#magick framebuffer.tga framebuffer.png
-#kitty +kitten icat framebuffer.png
 cd ..
