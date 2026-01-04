@@ -13,7 +13,6 @@
 #include <utility>
 #include <vector>
 
-
 #define PATH "../assets/demon.obj"
 #define WIDTH 640
 #define HEIGHT 480

@@ -4,9 +4,8 @@ if [ "$1" = "clean" ]; then
     exit 0
 fi
 
-mkdir -p artifacts
-
 if [ artifacts/app -ot main.cpp ]; then
+    mkdir -p artifacts
     echo "compiling ..."
     g++ -O3 main.cpp -fopenmp $(sdl2-config --cflags --libs) -o artifacts/app
 fi
