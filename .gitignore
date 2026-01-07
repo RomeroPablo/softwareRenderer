@@ -1,4 +1,2 @@
-assets/david
-assets/grace
-assets/hunter
+assets/*.obj
 artifacts/

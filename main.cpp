@@ -5,6 +5,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
+#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <omp.h>
@@ -13,27 +14,33 @@
 #include <utility>
 #include <vector>
 
-#define PATH "../assets/demon.obj"
-#define WIDTH 640
-#define HEIGHT 480
 
+//constexpr const char* PATH = "../assets/demon.obj";
+constexpr const char* PATH = "../assets/weep.obj";
+//constexpr const char* PATH = "../assets/dionysos.obj";
+constexpr uint16_t WIDTH  = 640;
+constexpr uint16_t HEIGHT = 480;
+constexpr uint16_t DEPTH  = 200;
+
+using color_t = 
 struct color {
-    std::uint8_t bgra[4] = {0,0,0,0};
-}typedef color_t;
+    std::uint8_t rgba[4] = {0,0,0,255};
+};
 
 constexpr color_t
-    white  = {255, 255, 255, 255}, 
-    green  = {  0, 255,   0, 255}, 
-    red    = {  0,   0, 255, 255}, 
-    blue   = {255, 128,  64, 255}, 
-    yellow = {  0, 200, 255, 255},
-    purple = {150,  50,  70, 255},
-    pink   = {150,  50, 175, 255},
-    teal   = {170, 215,  10, 255};
+    white  = {255, 255, 255, 255},
+    green  = {  0, 255,   0, 255},
+    red    = {255,   0,   0, 255},
+    blue   = { 64, 128, 255, 255},
+    yellow = {255, 200,   0, 255},
+    purple = { 70,  50, 150, 255},
+    pink   = {175,  50, 150, 255},
+    teal   = { 10, 215, 170, 255};
 
 constexpr color_t colors[] = {red, green, blue, pink, teal, purple};
 
-struct framebuffer{
+using framebuffer_t =
+struct framebuffer {
     framebuffer(int w, int h) : w(w), h(h), data(w*h*bpp, 0) {
         for (int j=0; j<h; j++)
             for (int i=0; i<w; i++)
@@ -41,18 +48,20 @@ struct framebuffer{
     }
     void set(int x, int y, const color_t& color){
         if (!data.size() || x<0 || y<0 || x>=w || y>=h) return;
-        memcpy(data.data()+(x+y*w)*bpp, color.bgra, bpp);
+        memcpy(data.data()+(x+y*w)*bpp, color.rgba, bpp);
     }
     void clear(){ std::fill(data.begin(), data.end(), 0); }
 
     int w;
     int h;
-    int bpp = 3; // 3 bytes per pixel B,G,R : No Alpha Channel ATM
+    int bpp = 4; // 4 bytes per pixel R, G, B, A
     std::vector<uint8_t> data = {};
-} typedef framebuffer_t;
+};
 
-struct vertex { float x{}, y{}, z{};  } typedef vertex_t;
-struct face   { size_t a{}, b{}, c{}; } typedef face_t;
+using vertex_t = struct vertex { float  x{}, y{}, z{}; };
+using face_t   = struct face   { size_t a{}, b{}, c{}; };
+
+using model_t =
 struct model {
     model(std::string path){
         std::ifstream file(path);
@@ -80,9 +89,10 @@ struct model {
     }
     std::vector<vertex_t> vertices;
     std::vector<face_t> faces;
-} typedef model_t;
+};
 
-struct state{
+using state_t =
+struct state {
     SDL_Window* sdlWindow;
     SDL_Renderer* sdlRenderer;
     SDL_Texture* sdlTexture;
@@ -94,13 +104,14 @@ struct state{
     struct{
         double x = 0.;
         double y = 0.;
+        double z = 0.;
     } mvp;
     struct {
         std::chrono::time_point<std::chrono::high_resolution_clock> s<%%>, e<%%>;
         std::chrono::milliseconds d<%%>;
         double frameTime = 1000.0/60.0; // 60 fps
     } time;
-}typedef state_t;
+};
 
 void line(int ax, int ay, int bx, int by, framebuffer_t &framebuffer, color_t color) {
     bool steep = std::abs (ax-bx) < std::abs(ay-by);
@@ -115,7 +126,6 @@ void line(int ax, int ay, int bx, int by, framebuffer_t &framebuffer, color_t co
 }
 
 void raster(int ax, int ay, int bx, int by, int cx, int cy, framebuffer_t &framebuffer, color_t color) {
-    // gtl, where g -> a, b, c <- l
     if(ay<by)<%std::swap(ay, by); std::swap(ax, bx);%>
     if(ay<cy)<%std::swap(ay, cy); std::swap(ax, cx);%>
     if(by<cy)<%std::swap(by, cy); std::swap(bx, cx);%>
@@ -132,7 +142,6 @@ void raster(int ax, int ay, int bx, int by, int cx, int cy, framebuffer_t &frame
         }
     }
 
-    // other triangle
     if(ay != by){
         int base_height = ay - by;
         for(int y = by; y < ay; y++){
@@ -148,36 +157,47 @@ double inline tArea(int ax, int ay, int bx, int by, int cx, int cy){
     return .5*((by-ay)*(bx+ax) + (cy-by)*(cx+bx) + (ay-cy)*(ax+cx));
 }
 
-void rasterOMP(int ax, int ay, int bx, int by, int cx, int cy, framebuffer_t &framebuffer, color_t color) {
+void rasterOMP(int ax, int ay, int az, int bx, int by, int bz, int cx, int cy, int cz, framebuffer_t &framebuffer) {
+    double area = tArea(ax, ay, bx, by, cx, cy);
+    if(area<1) return; // backface culling
+
     int bbXMin = std::min(std::min(ax, bx), cx);
     int bbXMax = std::max(std::max(ax, bx), cx);
     int bbYMin = std::min(std::min(ay, by), cy);
     int bbYMax = std::max(std::max(ay, by), cy);
 
-    double area = tArea(ax, ay, bx, by, cx, cy);
-    if(area<1) return; // backface culling
-
-
-//#pragma omp parallel for // this kills perf
+// #pragma omp parallel for // this kills perf
     for(int x = bbXMin; x < bbXMax; x++){
         for(int y = bbYMin; y < bbYMax; y++){
             double α = tArea(x, y, bx, by, cx, cy) / area;
             double β = tArea(x, y, cx, cy, ax, ay) / area;
             double γ = tArea(x, y, ax, ay, bx, by) / area;
             if(α<0|| β<0|| γ<0) continue;
-            framebuffer.set(x, y, color);
+
+            //uint8_t r = α * az; uint8_t g = β * bz; uint8_t b = γ * cz;
+            //framebuffer.set(x, y, {r, g, b});
+
+            unsigned char z = static_cast<unsigned char>(α * az + β * bz + γ * cz);
+            framebuffer.set(x, y, {z, z, z});
         }
     }
 }
 
 void drawTriangles(framebuffer_t& framebuffer){
-    rasterOMP(  7, 45, 35, 100, 45,  60, framebuffer, red);
-    rasterOMP(120, 35, 90,   5, 45, 110, framebuffer, white);
-    rasterOMP(115, 83, 80,  90, 85, 120, framebuffer, green);
+    rasterOMP( 45,  60,  15, 
+               35, 100,  75, 
+                7,  35, 205, framebuffer);
+    rasterOMP( 45, 110,  15, 
+               90,   5,  75, 
+              120,  35, 205, framebuffer);
+    rasterOMP( 85, 120,  15, 
+               80,  90,  75, 
+              115,  83, 205, framebuffer);
 }
 
 inline double hP(double x){ return std::clamp((x + 1.) * WIDTH /2, 0.0, double(WIDTH ));}
 inline double vP(double y){ return std::clamp((1. - y) * HEIGHT/2, 0.0, double(HEIGHT));}
+inline double dP(double z){ return std::clamp((z + 1.) *   255./2, 0.0, double(DEPTH));}
 
 void drawModel(state_t& state, framebuffer_t& framebuffer, const model_t& model){
     int j = 0;
@@ -185,8 +205,11 @@ void drawModel(state_t& state, framebuffer_t& framebuffer, const model_t& model)
         double ax = hP(model.vertices[f.a-1].x + state.mvp.x), ay = vP(model.vertices[f.a-1].y + state.mvp.y);
         double bx = hP(model.vertices[f.b-1].x + state.mvp.x), by = vP(model.vertices[f.b-1].y + state.mvp.y);
         double cx = hP(model.vertices[f.c-1].x + state.mvp.x), cy = vP(model.vertices[f.c-1].y + state.mvp.y);
-        rasterOMP(ax, ay, bx, by, cx, cy, framebuffer, colors[j]);
-        j = (j+1)%6; // this is a bug but looks cool
+        double az = dP(model.vertices[f.a-1].z + state.mvp.z);
+        double bz = dP(model.vertices[f.b-1].z + state.mvp.z);
+        double cz = dP(model.vertices[f.c-1].z + state.mvp.z);
+
+        rasterOMP(ax, ay, az, bx, by, bz, cx, cy, cz, framebuffer);
     }
 }
 
@@ -259,7 +282,7 @@ int main(int argc, char** argv) {
     SDL_Init(SDL_INIT_VIDEO);
     state.sdlWindow    = SDL_CreateWindow("trr", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, WIDTH, HEIGHT, 0);
     state.sdlRenderer  = SDL_CreateRenderer(state.sdlWindow, -1, SDL_RENDERER_ACCELERATED);
-    state.sdlTexture   = SDL_CreateTexture(state.sdlRenderer, SDL_PIXELFORMAT_BGR24, SDL_TEXTUREACCESS_STREAMING, framebuffer.w, framebuffer.h);
+    state.sdlTexture   = SDL_CreateTexture(state.sdlRenderer, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_STREAMING, framebuffer.w, framebuffer.h);
 
     int t = omp_get_max_threads();
     std::cout << "system has " << t << " threads" << std::endl;
