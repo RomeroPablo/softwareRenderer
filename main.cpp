@@ -15,16 +15,17 @@
 #include <vector>
 
 
-//constexpr const char* PATH = "../assets/demon.obj";
-constexpr const char* PATH = "../assets/weep.obj";
+constexpr const char* PATH = "../assets/demon.obj";
+//constexpr const char* PATH = "../assets/hunter.obj";
+//constexpr const char* PATH = "../assets/weep.obj";
 //constexpr const char* PATH = "../assets/dionysos.obj";
 constexpr uint16_t WIDTH  = 640;
 constexpr uint16_t HEIGHT = 480;
-constexpr uint16_t DEPTH  = 200;
+constexpr uint16_t DEPTH  = 255;
 
 using color_t = 
 struct color {
-    std::uint8_t rgba[4] = {0,0,0,255};
+    uint8_t rgba[4] = {0,0,0,0};
 };
 
 constexpr color_t
@@ -50,7 +51,16 @@ struct framebuffer {
         if (!data.size() || x<0 || y<0 || x>=w || y>=h) return;
         memcpy(data.data()+(x+y*w)*bpp, color.rgba, bpp);
     }
-    void clear(){ std::fill(data.begin(), data.end(), 0); }
+    color_t get(int x, int y){
+        if (!data.size() || x<0 || y<0 || x>=w || y>=h) return {0,0,0,0};
+        color_t ret;
+        ret.rgba[0] = data[(x+y*w)*bpp+0];
+        ret.rgba[1] = data[(x+y*w)*bpp+1];
+        ret.rgba[2] = data[(x+y*w)*bpp+2];
+        ret.rgba[3] = data[(x+y*w)*bpp+3];
+        return ret;
+    }
+    void clear(uint8_t c = 0){ std::fill(data.begin(), data.end(), c); }
 
     int w;
     int h;
@@ -157,9 +167,9 @@ double inline tArea(int ax, int ay, int bx, int by, int cx, int cy){
     return .5*((by-ay)*(bx+ax) + (cy-by)*(cx+bx) + (ay-cy)*(ax+cx));
 }
 
-void rasterOMP(int ax, int ay, int az, int bx, int by, int bz, int cx, int cy, int cz, framebuffer_t &framebuffer) {
+void rasterOMP(int ax, int ay, int az, int bx, int by, int bz, int cx, int cy, int cz, framebuffer_t &framebuffer, framebuffer_t &depthbuffer) {
     double area = tArea(ax, ay, bx, by, cx, cy);
-    if(area<1) return; // backface culling
+    //if(area<1) return; // backface & area culling
 
     int bbXMin = std::min(std::min(ax, bx), cx);
     int bbXMax = std::max(std::max(ax, bx), cx);
@@ -174,32 +184,20 @@ void rasterOMP(int ax, int ay, int az, int bx, int by, int bz, int cx, int cy, i
             double γ = tArea(x, y, ax, ay, bx, by) / area;
             if(α<0|| β<0|| γ<0) continue;
 
-            //uint8_t r = α * az; uint8_t g = β * bz; uint8_t b = γ * cz;
-            //framebuffer.set(x, y, {r, g, b});
-
             unsigned char z = static_cast<unsigned char>(α * az + β * bz + γ * cz);
+            if(z <= depthbuffer.get(x, y).rgba[0]) continue;
+            depthbuffer.set(x, y, {z});
             framebuffer.set(x, y, {z, z, z});
         }
     }
 }
 
-void drawTriangles(framebuffer_t& framebuffer){
-    rasterOMP( 45,  60,  15, 
-               35, 100,  75, 
-                7,  35, 205, framebuffer);
-    rasterOMP( 45, 110,  15, 
-               90,   5,  75, 
-              120,  35, 205, framebuffer);
-    rasterOMP( 85, 120,  15, 
-               80,  90,  75, 
-              115,  83, 205, framebuffer);
-}
-
 inline double hP(double x){ return std::clamp((x + 1.) * WIDTH /2, 0.0, double(WIDTH ));}
 inline double vP(double y){ return std::clamp((1. - y) * HEIGHT/2, 0.0, double(HEIGHT));}
-inline double dP(double z){ return std::clamp((z + 1.) *   255./2, 0.0, double(DEPTH));}
+inline double dP(double z){ return std::clamp((z + 1.) * DEPTH /2, 0.0, double(DEPTH));}
 
-void drawModel(state_t& state, framebuffer_t& framebuffer, const model_t& model){
+
+void drawModel(state_t& state, framebuffer_t& framebuffer, framebuffer_t& depthbuffer, const model_t& model){
     int j = 0;
     for(const auto& f : model.faces){
         double ax = hP(model.vertices[f.a-1].x + state.mvp.x), ay = vP(model.vertices[f.a-1].y + state.mvp.y);
@@ -209,7 +207,7 @@ void drawModel(state_t& state, framebuffer_t& framebuffer, const model_t& model)
         double bz = dP(model.vertices[f.b-1].z + state.mvp.z);
         double cz = dP(model.vertices[f.c-1].z + state.mvp.z);
 
-        rasterOMP(ax, ay, az, bx, by, bz, cx, cy, cz, framebuffer);
+        rasterOMP(ax, ay, az, bx, by, bz, cx, cy, cz, framebuffer, depthbuffer);
     }
 }
 
@@ -241,8 +239,8 @@ void getInput(state_t& state){
             default: break;
         }
     }
-    if(state.up)    state.mvp.y += 0.1;
-    if(state.down)  state.mvp.y -= 0.1;
+    if(state.up)    state.mvp.z += 0.1;
+    if(state.down)  state.mvp.z -= 0.1;
     if(state.left)  state.mvp.x -= 0.1;
     if(state.right) state.mvp.x += 0.1;
 }
@@ -278,6 +276,7 @@ void benchmark(){
 int main(int argc, char** argv) {
     model_t model(PATH);
     framebuffer_t framebuffer(WIDTH, HEIGHT);
+    framebuffer_t depthbuffer(WIDTH, HEIGHT);
     state_t state;
     SDL_Init(SDL_INIT_VIDEO);
     state.sdlWindow    = SDL_CreateWindow("trr", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, WIDTH, HEIGHT, 0);
@@ -292,10 +291,10 @@ int main(int argc, char** argv) {
         std::cout << '\r' << "ft: " << state.time.d.count() << " mS" << std::flush;
         state.time.s = std::chrono::high_resolution_clock::now();
 
+        depthbuffer.clear(0);
         framebuffer.clear();
         getInput(state);
-        drawModel(state, framebuffer, model);
-        //drawTriangles(framebuffer);
+        drawModel(state, framebuffer, depthbuffer, model);
         showFramebuffer(state, framebuffer);
 
     } std::cout << std::endl << std::flush;
