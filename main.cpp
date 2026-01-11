@@ -16,9 +16,9 @@
 
 #include "geometry.hpp"
 
-//constexpr const char* PATH = "../assets/demon.obj";
+constexpr const char* PATH = "../assets/demon.obj";
 //constexpr const char* PATH = "../assets/hunter.obj";
-constexpr const char* PATH = "../assets/weep.obj";
+//constexpr const char* PATH = "../assets/weep.obj";
 //constexpr const char* PATH = "../assets/dionysos.obj";
 constexpr uint16_t WIDTH  = 640;
 constexpr uint16_t HEIGHT = 480;

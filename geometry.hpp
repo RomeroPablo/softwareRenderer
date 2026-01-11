@@ -81,20 +81,18 @@ template<integer T, std::size_t m, std::size_t n> struct mat{
     }
 
     constexpr mat<T, m, n> operator+(const mat<T, m, n>& b) const noexcept{
-        mat<T, m, n> c;
-
+        mat<T, m, n> c{};
+        for(std::size_t i = {0uz}; i < m; i++){
+            c[i] = (*this)[i] + b[i];
+        }
         return c;
     }
 
-    constexpr mat<T, m, n> operator-(const mat<T, m, n>& B) const noexcept{
+    constexpr mat<T, m, n> operator-(const mat<T, m, n>& b) const noexcept{
         mat<T, m, n> c;
-
-        return c;
-    }
-
-    constexpr mat<T, m, n> operator*(const mat<T, m, n>& B) const noexcept{
-        mat<T, m, n> c;
-
+        for(std::size_t i = {0uz}; i < m; i++){
+            c[i] = (*this)[i] - b[i];
+        }
         return c;
     }
 
@@ -104,5 +102,14 @@ template<integer T, std::size_t m, std::size_t n> struct mat{
             u[i] = (*this)[i].dot(v);
         }
         return u;
+    }
+
+    constexpr mat<T, m, n> operator*(const mat<T, n, n>& b) const noexcept{
+        mat<T, m, n> c;
+        for(std::size_t i = {0uz}; i < m; i++){
+            for(std::size_t j = {0uz}; j < n; j++)
+                c[i][j] = (*this)[i][j].dot(b[i][j]);
+        }
+        return c;
     }
 };
