@@ -14,10 +14,11 @@
 #include <utility>
 #include <vector>
 
+#include "geometry.hpp"
 
-constexpr const char* PATH = "../assets/demon.obj";
+//constexpr const char* PATH = "../assets/demon.obj";
 //constexpr const char* PATH = "../assets/hunter.obj";
-//constexpr const char* PATH = "../assets/weep.obj";
+constexpr const char* PATH = "../assets/weep.obj";
 //constexpr const char* PATH = "../assets/dionysos.obj";
 constexpr uint16_t WIDTH  = 640;
 constexpr uint16_t HEIGHT = 480;
@@ -106,20 +107,22 @@ struct state {
     SDL_Window* sdlWindow;
     SDL_Renderer* sdlRenderer;
     SDL_Texture* sdlTexture;
-    bool running = true;
-    bool up = false;
-    bool down = false;
-    bool left = false;
-    bool right = false;
+    struct {
+        bool running = true;
+        bool up = false;
+        bool down = false;
+        bool left = false;
+        bool right = false;
+    } controls;
     struct{
         double x = 0.;
         double y = 0.;
         double z = 0.;
-    } mvp;
+    } camera;
     struct {
         std::chrono::time_point<std::chrono::high_resolution_clock> s<%%>, e<%%>;
         std::chrono::milliseconds d<%%>;
-        double frameTime = 1000.0/60.0; // 60 fps
+        double ft = 1000.0/60.0; // 60 fps
     } time;
 };
 
@@ -196,16 +199,16 @@ inline double hP(double x){ return std::clamp((x + 1.) * WIDTH /2, 0.0, double(W
 inline double vP(double y){ return std::clamp((1. - y) * HEIGHT/2, 0.0, double(HEIGHT));}
 inline double dP(double z){ return std::clamp((z + 1.) * DEPTH /2, 0.0, double(DEPTH));}
 
-
 void drawModel(state_t& state, framebuffer_t& framebuffer, framebuffer_t& depthbuffer, const model_t& model){
+    // instead of passing state, we should simply push the MVP matrix
     int j = 0;
     for(const auto& f : model.faces){
-        double ax = hP(model.vertices[f.a-1].x + state.mvp.x), ay = vP(model.vertices[f.a-1].y + state.mvp.y);
-        double bx = hP(model.vertices[f.b-1].x + state.mvp.x), by = vP(model.vertices[f.b-1].y + state.mvp.y);
-        double cx = hP(model.vertices[f.c-1].x + state.mvp.x), cy = vP(model.vertices[f.c-1].y + state.mvp.y);
-        double az = dP(model.vertices[f.a-1].z + state.mvp.z);
-        double bz = dP(model.vertices[f.b-1].z + state.mvp.z);
-        double cz = dP(model.vertices[f.c-1].z + state.mvp.z);
+        double ax = hP(model.vertices[f.a-1].x + state.camera.x), ay = vP(model.vertices[f.a-1].y + state.camera.y);
+        double bx = hP(model.vertices[f.b-1].x + state.camera.x), by = vP(model.vertices[f.b-1].y + state.camera.y);
+        double cx = hP(model.vertices[f.c-1].x + state.camera.x), cy = vP(model.vertices[f.c-1].y + state.camera.y);
+        double az = dP(model.vertices[f.a-1].z + state.camera.z);
+        double bz = dP(model.vertices[f.b-1].z + state.camera.z);
+        double cz = dP(model.vertices[f.c-1].z + state.camera.z);
 
         rasterOMP(ax, ay, az, bx, by, bz, cx, cy, cz, framebuffer, depthbuffer);
     }
@@ -216,33 +219,33 @@ void getInput(state_t& state){
     while (SDL_PollEvent(&e)){
         switch (e.type){
             case SDL_QUIT:
-                state.running = false;
+                state.controls.running = false;
                 break;
             case SDL_KEYDOWN:
-                if (e.key.keysym.sym == SDLK_ESCAPE) state.running = false;
-                if (e.key.keysym.scancode == SDL_SCANCODE_W) state.up    = true;
-                if (e.key.keysym.scancode == SDL_SCANCODE_S) state.down  = true;
-                if (e.key.keysym.scancode == SDL_SCANCODE_A) state.left  = true;
-                if (e.key.keysym.scancode == SDL_SCANCODE_D) state.right = true;
+                if (e.key.keysym.sym == SDLK_ESCAPE) state.controls.running = false;
+                if (e.key.keysym.scancode == SDL_SCANCODE_W) state.controls.up    = true;
+                if (e.key.keysym.scancode == SDL_SCANCODE_S) state.controls.down  = true;
+                if (e.key.keysym.scancode == SDL_SCANCODE_A) state.controls.left  = true;
+                if (e.key.keysym.scancode == SDL_SCANCODE_D) state.controls.right = true;
                 break;
             case SDL_KEYUP:
-                if (e.key.keysym.scancode == SDL_SCANCODE_W) state.up    = false;
-                if (e.key.keysym.scancode == SDL_SCANCODE_S) state.down  = false;
-                if (e.key.keysym.scancode == SDL_SCANCODE_A) state.left  = false;
-                if (e.key.keysym.scancode == SDL_SCANCODE_D) state.right = false;
+                if (e.key.keysym.scancode == SDL_SCANCODE_W) state.controls.up    = false;
+                if (e.key.keysym.scancode == SDL_SCANCODE_S) state.controls.down  = false;
+                if (e.key.keysym.scancode == SDL_SCANCODE_A) state.controls.left  = false;
+                if (e.key.keysym.scancode == SDL_SCANCODE_D) state.controls.right = false;
                 break;
             case SDL_WINDOWEVENT:
                 if (e.window.event == SDL_WINDOWEVENT_FOCUS_LOST){
-                    state.up = state.down = state.left = state.right = false; // drop stale key state when focus leaves
+                    state.controls.up = state.controls.down = state.controls.left = state.controls.right = false; // drop stale key state when focus leaves
                 }
                 break;
             default: break;
         }
     }
-    if(state.up)    state.mvp.z += 0.1;
-    if(state.down)  state.mvp.z -= 0.1;
-    if(state.left)  state.mvp.x -= 0.1;
-    if(state.right) state.mvp.x += 0.1;
+    if(state.controls.up)    state.camera.z += 0.1;
+    if(state.controls.down)  state.camera.z -= 0.1;
+    if(state.controls.left)  state.camera.x -= 0.1;
+    if(state.controls.right) state.camera.x += 0.1;
 }
 
 void showFramebuffer(state_t& state, const framebuffer_t& fb) {
@@ -252,7 +255,7 @@ void showFramebuffer(state_t& state, const framebuffer_t& fb) {
     SDL_RenderPresent(state.sdlRenderer);
     state.time.e = std::chrono::high_resolution_clock::now();
     state.time.d = std::chrono::duration_cast<std::chrono::milliseconds>(state.time.e - state.time.s);
-    SDL_Delay(std::max(state.time.frameTime - state.time.d.count(), 0.0));
+    SDL_Delay(std::max(state.time.ft - state.time.d.count(), 0.0));
 }
 
 void benchmark(){
@@ -278,6 +281,15 @@ int main(int argc, char** argv) {
     framebuffer_t framebuffer(WIDTH, HEIGHT);
     framebuffer_t depthbuffer(WIDTH, HEIGHT);
     state_t state;
+
+    vec<int, 2> v = {12, 13};
+    mat<int, 2, 2> matrix;
+    matrix[0] = {1,0};
+    matrix[1] = {0,1};
+    v = matrix * v;
+
+    std::cout << v[0] << ' ' << v[1] << std::endl;
+
     SDL_Init(SDL_INIT_VIDEO);
     state.sdlWindow    = SDL_CreateWindow("trr", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, WIDTH, HEIGHT, 0);
     state.sdlRenderer  = SDL_CreateRenderer(state.sdlWindow, -1, SDL_RENDERER_ACCELERATED);
@@ -286,12 +298,11 @@ int main(int argc, char** argv) {
     int t = omp_get_max_threads();
     std::cout << "system has " << t << " threads" << std::endl;
 
-//  benchmark();
-    while(state.running){
+    while(state.controls.running){
         std::cout << '\r' << "ft: " << state.time.d.count() << " mS" << std::flush;
         state.time.s = std::chrono::high_resolution_clock::now();
 
-        depthbuffer.clear(0);
+        depthbuffer.clear();
         framebuffer.clear();
         getInput(state);
         drawModel(state, framebuffer, depthbuffer, model);

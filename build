@@ -7,7 +7,11 @@ fi
 if [ artifacts/app -ot main.cpp ]; then
     mkdir -p artifacts
     echo "compiling ..."
-    g++ -O3 main.cpp -fopenmp $(sdl2-config --cflags --libs) -o artifacts/app
+    if command -v bear >/dev/null 2>&1; then
+        bear --output artifacts/compile_commands.json -- g++ -std=c++23 -O3 main.cpp -fopenmp $(sdl2-config --cflags --libs) -o artifacts/app
+    else
+        g++ -std=c++23 -O3 main.cpp -fopenmp $(sdl2-config --cflags --libs) -o artifacts/app
+    fi
 fi
 
 cd artifacts 
