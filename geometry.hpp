@@ -73,7 +73,6 @@ template<integer T, std::size_t N> struct vec{
     double angle(const vec<T,N>& w) const {
         return std::acos( std::clamp(this->dot(w) / (this->length() * w.length()), -1., 1.) );
     }
-
 };
 
 template<integer T, std::size_t m, std::size_t n> struct mat{

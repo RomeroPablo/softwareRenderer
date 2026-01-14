@@ -28,6 +28,7 @@ struct state {
     SDL_Window* sdlWindow;
     SDL_Renderer* sdlRenderer;
     SDL_Texture* sdlTexture;
+
     struct {
         bool running = true;
         bool up = false;
@@ -35,29 +36,15 @@ struct state {
         bool left = false;
         bool right = false;
     } controls;
-    struct{
-        double x = 0.;
-        double y = 0.;
-        double z = 0.;
-    } camera;
+
+    vec<double, 3> camera;
+
     struct {
         std::chrono::time_point<std::chrono::high_resolution_clock> start<%%>, end<%%>;
         std::chrono::milliseconds delta<%%>;
         double frameTime = 1000.0/60.0; // 60 fps
     } time;
 };
-
-void line(int ax, int ay, int bx, int by, framebuffer_t &framebuffer, color_t color) {
-    bool steep = std::abs (ax-bx) < std::abs(ay-by);
-    if(steep) <% std::swap(ax, ay); std::swap(bx, by); %>
-    if(ax>bx) <% std::swap(ax, bx); std::swap(ay, by); %>
-
-    float y = ay;
-    const float f = (by-ay) / static_cast<float>(bx-ax);
-
-    if(steep)<% for(size_t x=ax; x<=bx; x++, y+=f) framebuffer.set(y, x, color); %>
-    else     <% for(size_t x=ax; x<=bx; x++, y+=f) framebuffer.set(x, y, color); %>
-}
 
 void line(vec<int, 2> a, vec<int, 2> b, framebuffer_t &framebuffer, color_t color) {
     bool steep = std::abs (a[0]-b[0]) < std::abs(a[1]-b[1]);
@@ -100,28 +87,33 @@ void raster(int ax, int ay, int bx, int by, int cx, int cy, framebuffer_t &frame
     }
 }
 
-double inline tArea(int ax, int ay, int bx, int by, int cx, int cy){
-    return .5*((by-ay)*(bx+ax) + (cy-by)*(cx+bx) + (ay-cy)*(ax+cx));
+
+double inline tArea(vec<int, 2> a, vec<int, 2> b, vec<int, 2> c){
+    return .5*((b.y-a.y)*(b.x+a.x) + (c.y-b.y)*(c.x+b.x) + (a.y-c.y)*(a.x+c.x));
 }
 
-void rasterOMP(int ax, int ay, int az, int bx, int by, int bz, int cx, int cy, int cz, framebuffer_t &framebuffer, framebuffer_t &depthbuffer) {
-    double area = tArea(ax, ay, bx, by, cx, cy);
+inline double hP(double x){ return std::clamp((x + 1.) * WIDTH /2, 0.0, double(WIDTH ));}
+inline double vP(double y){ return std::clamp((1. - y) * HEIGHT/2, 0.0, double(HEIGHT));}
+inline double dP(double z){ return std::clamp((z + 1.) * DEPTH /2, 0.0, double(DEPTH));}
+
+void rasterOMP(vec<int, 3> a, vec<int, 3> b, vec<int, 3> c, framebuffer_t& framebuffer, framebuffer_t& depthbuffer){
+    double area = tArea(vec<int, 2>{a.x, a.y}, vec<int, 2>{b.x, b.y}, vec<int, 2>{c.x, c.y});
     //if(area<1) return; // backface & area culling
 
-    int bbXMin = std::min(std::min(ax, bx), cx);
-    int bbXMax = std::max(std::max(ax, bx), cx);
-    int bbYMin = std::min(std::min(ay, by), cy);
-    int bbYMax = std::max(std::max(ay, by), cy);
+    int bbXMin = std::min(std::min(a.x, b.x), c.x);
+    int bbXMax = std::max(std::max(a.x, b.x), c.x);
+    int bbYMin = std::min(std::min(a.y, b.y), c.y);
+    int bbYMax = std::max(std::max(a.y, b.y), c.y);
 
 // #pragma omp parallel for // this kills perf
     for(int x = bbXMin; x < bbXMax; x++){
         for(int y = bbYMin; y < bbYMax; y++){
-            double α = tArea(x, y, bx, by, cx, cy) / area;
-            double β = tArea(x, y, cx, cy, ax, ay) / area;
-            double γ = tArea(x, y, ax, ay, bx, by) / area;
+            double α = tArea(vec<int, 2>{x, y}, vec<int, 2>{b.x, b.y}, vec<int, 2>{c.x, c.y}) / area;
+            double β = tArea(vec<int, 2>{x, y}, vec<int, 2>{c.x, c.y}, vec<int, 2>{a.x, a.y}) / area;
+            double γ = tArea(vec<int, 2>{x, y}, vec<int, 2>{a.x, a.y}, vec<int, 2>{b.x, b.y}) / area;
             if(α<0|| β<0|| γ<0) continue;
 
-            unsigned char z = static_cast<unsigned char>(α * az + β * bz + γ * cz);
+            unsigned char z = static_cast<unsigned char>(α * a.z + β * b.z + γ * c.z);
             if(z <= depthbuffer.get(x, y)[0]) continue;
             depthbuffer.set(x, y, {z});
             framebuffer.set(x, y, {z, z, z});
@@ -129,22 +121,16 @@ void rasterOMP(int ax, int ay, int az, int bx, int by, int bz, int cx, int cy, i
     }
 }
 
-inline double hP(double x){ return std::clamp((x + 1.) * WIDTH /2, 0.0, double(WIDTH ));}
-inline double vP(double y){ return std::clamp((1. - y) * HEIGHT/2, 0.0, double(HEIGHT));}
-inline double dP(double z){ return std::clamp((z + 1.) * DEPTH /2, 0.0, double(DEPTH));}
-
 void drawModel(state_t& state, framebuffer_t& framebuffer, framebuffer_t& depthbuffer, const model_t& model){
-    // instead of passing state, we should simply push the MVP matrix
-    int j = 0;
     for(const auto& f : model.faces){
-        double ax = hP(model.vertices[f.a-1].x + state.camera.x), ay = vP(model.vertices[f.a-1].y + state.camera.y);
-        double bx = hP(model.vertices[f.b-1].x + state.camera.x), by = vP(model.vertices[f.b-1].y + state.camera.y);
-        double cx = hP(model.vertices[f.c-1].x + state.camera.x), cy = vP(model.vertices[f.c-1].y + state.camera.y);
-        double az = dP(model.vertices[f.a-1].z + state.camera.z);
-        double bz = dP(model.vertices[f.b-1].z + state.camera.z);
-        double cz = dP(model.vertices[f.c-1].z + state.camera.z);
+        int ax = hP(model.vertices[f.a-1].x + state.camera.x), ay = vP(model.vertices[f.a-1].y + state.camera.y);
+        int bx = hP(model.vertices[f.b-1].x + state.camera.x), by = vP(model.vertices[f.b-1].y + state.camera.y);
+        int cx = hP(model.vertices[f.c-1].x + state.camera.x), cy = vP(model.vertices[f.c-1].y + state.camera.y);
+        int az = dP(model.vertices[f.a-1].z + state.camera.z);
+        int bz = dP(model.vertices[f.b-1].z + state.camera.z);
+        int cz = dP(model.vertices[f.c-1].z + state.camera.z);
 
-        rasterOMP(ax, ay, az, bx, by, bz, cx, cy, cz, framebuffer, depthbuffer);
+        rasterOMP(vec<int, 3>{ax, ay, az}, vec<int, 3>{bx, by, bz}, vec<int, 3>{cx, cy, cz}, framebuffer, depthbuffer);
     }
 }
 
@@ -199,9 +185,9 @@ void benchmark(){
 
     std::srand(std::time({}));
     for (int i={}; i<(1<<24); i++) {
-        int ax = rand()%WIDTH, ay = rand()%HEIGHT;
-        int bx = rand()%WIDTH, by = rand()%HEIGHT;
-        line(ax, ay, bx, by, framebuffer,
+        vec<int, 2> a = {rand()%WIDTH, rand()%HEIGHT};
+        vec<int, 2> b = {rand()%WIDTH, rand()%HEIGHT};
+        line(a, b, framebuffer,
         {static_cast<uint8_t>(rand()%255),  static_cast<uint8_t>(rand()%255), static_cast<uint8_t>(rand()%255), static_cast<uint8_t>(rand()%255)});
     }
     e = std::chrono::high_resolution_clock::now();
