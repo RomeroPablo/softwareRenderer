@@ -5,16 +5,15 @@
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
-#include <filesystem>
-#include <fstream>
 #include <iostream>
 #include <omp.h>
-#include <sstream>
 #include <string>
 #include <utility>
 #include <vector>
 
+#include "framebuffer.hpp"
 #include "geometry.hpp"
+#include "model.hpp"
 
 constexpr const char* PATH = "../assets/demon.obj";
 //constexpr const char* PATH = "../assets/hunter.obj";
@@ -24,86 +23,8 @@ constexpr uint16_t WIDTH  = 640;
 constexpr uint16_t HEIGHT = 480;
 constexpr uint16_t DEPTH  = 255;
 
-using color_t = 
-struct color {
-    uint8_t rgba[4] = {0,0,0,0};
-};
-
-constexpr color_t
-    white  = {255, 255, 255, 255},
-    green  = {  0, 255,   0, 255},
-    red    = {255,   0,   0, 255},
-    blue   = { 64, 128, 255, 255},
-    yellow = {255, 200,   0, 255},
-    purple = { 70,  50, 150, 255},
-    pink   = {175,  50, 150, 255},
-    teal   = { 10, 215, 170, 255};
-
-constexpr color_t colors[] = {red, green, blue, pink, teal, purple};
-
-using framebuffer_t =
-struct framebuffer {
-    framebuffer(int w, int h) : w(w), h(h), data(w*h*bpp, 0) {
-        for (int j=0; j<h; j++)
-            for (int i=0; i<w; i++)
-                set(i, j, {});
-    }
-    void set(int x, int y, const color_t& color){
-        if (!data.size() || x<0 || y<0 || x>=w || y>=h) return;
-        memcpy(data.data()+(x+y*w)*bpp, color.rgba, bpp);
-    }
-    color_t get(int x, int y){
-        if (!data.size() || x<0 || y<0 || x>=w || y>=h) return {0,0,0,0};
-        color_t ret;
-        ret.rgba[0] = data[(x+y*w)*bpp+0];
-        ret.rgba[1] = data[(x+y*w)*bpp+1];
-        ret.rgba[2] = data[(x+y*w)*bpp+2];
-        ret.rgba[3] = data[(x+y*w)*bpp+3];
-        return ret;
-    }
-    void clear(uint8_t c = 0){ std::fill(data.begin(), data.end(), c); }
-
-    int w;
-    int h;
-    int bpp = 4; // 4 bytes per pixel R, G, B, A
-    std::vector<uint8_t> data = {};
-};
-
-using vertex_t = struct vertex { float  x{}, y{}, z{}; };
-using face_t   = struct face   { size_t a{}, b{}, c{}; };
-
-using model_t =
-struct model {
-    model(std::string path){
-        std::ifstream file(path);
-        if(!file) std::cout << "Model Not Found" << std::endl;
-        std::string line;
-        while(std::getline(file, line)){
-            std::istringstream iss(line);
-            std::string tag;
-            iss >> tag;
-
-            if(tag == "v"){
-                float x, y, z;
-                iss >> x >> y >> z;
-                vertices.emplace_back((vertex_t){x, y, z});
-            } else 
-
-            if (tag == "f"){
-                size_t a, b, c;
-                iss >> a;
-                iss.ignore(std::numeric_limits<std::streamsize>::max(), ' '); iss >> b;
-                iss.ignore(std::numeric_limits<std::streamsize>::max(), ' '); iss >> c;
-                faces.emplace_back((face_t){a, b, c});
-            }
-        }
-    }
-    std::vector<vertex_t> vertices;
-    std::vector<face_t> faces;
-};
-
 using state_t =
-struct state {
+struct state { 
     SDL_Window* sdlWindow;
     SDL_Renderer* sdlRenderer;
     SDL_Texture* sdlTexture;
@@ -120,9 +41,9 @@ struct state {
         double z = 0.;
     } camera;
     struct {
-        std::chrono::time_point<std::chrono::high_resolution_clock> s<%%>, e<%%>;
-        std::chrono::milliseconds d<%%>;
-        double ft = 1000.0/60.0; // 60 fps
+        std::chrono::time_point<std::chrono::high_resolution_clock> start<%%>, end<%%>;
+        std::chrono::milliseconds delta<%%>;
+        double frameTime = 1000.0/60.0; // 60 fps
     } time;
 };
 
@@ -137,6 +58,19 @@ void line(int ax, int ay, int bx, int by, framebuffer_t &framebuffer, color_t co
     if(steep)<% for(size_t x=ax; x<=bx; x++, y+=f) framebuffer.set(y, x, color); %>
     else     <% for(size_t x=ax; x<=bx; x++, y+=f) framebuffer.set(x, y, color); %>
 }
+
+void line(vec<int, 2> a, vec<int, 2> b, framebuffer_t &framebuffer, color_t color) {
+    bool steep = std::abs (a[0]-b[0]) < std::abs(a[1]-b[1]);
+    if(steep) <% std::swap(a[0], a[1]); std::swap(b[0], b[1]); %>
+    if(a[0]>b[0]) <% std::swap(a[0], b[0]); std::swap(a[1], b[1]); %>
+
+    float y = a[1];
+    const float f = (b[1]-a[1]) / static_cast<float>(b[0]-a[0]);
+
+    if(steep)<% for(size_t x=a[0]; x<=b[0]; x++, y+=f) framebuffer.set(y, x, color); %>
+    else     <% for(size_t x=a[0]; x<=b[0]; x++, y+=f) framebuffer.set(x, y, color); %>
+}
+
 
 void raster(int ax, int ay, int bx, int by, int cx, int cy, framebuffer_t &framebuffer, color_t color) {
     if(ay<by)<%std::swap(ay, by); std::swap(ax, bx);%>
@@ -188,7 +122,7 @@ void rasterOMP(int ax, int ay, int az, int bx, int by, int bz, int cx, int cy, i
             if(α<0|| β<0|| γ<0) continue;
 
             unsigned char z = static_cast<unsigned char>(α * az + β * bz + γ * cz);
-            if(z <= depthbuffer.get(x, y).rgba[0]) continue;
+            if(z <= depthbuffer.get(x, y)[0]) continue;
             depthbuffer.set(x, y, {z});
             framebuffer.set(x, y, {z, z, z});
         }
@@ -253,9 +187,9 @@ void showFramebuffer(state_t& state, const framebuffer_t& fb) {
     SDL_RenderClear(state.sdlRenderer);
     SDL_RenderCopy(state.sdlRenderer, state.sdlTexture, nullptr, nullptr);
     SDL_RenderPresent(state.sdlRenderer);
-    state.time.e = std::chrono::high_resolution_clock::now();
-    state.time.d = std::chrono::duration_cast<std::chrono::milliseconds>(state.time.e - state.time.s);
-    SDL_Delay(std::max(state.time.ft - state.time.d.count(), 0.0));
+    state.time.end = std::chrono::high_resolution_clock::now();
+    state.time.delta = std::chrono::duration_cast<std::chrono::milliseconds>(state.time.end - state.time.start);
+    SDL_Delay(std::max(state.time.frameTime - state.time.delta.count(), 0.0));
 }
 
 void benchmark(){
@@ -276,38 +210,32 @@ void benchmark(){
     assert(0);
 }
 
+void initWindow(state_t& state, framebuffer_t& framebuffer){
+    SDL_Init(SDL_INIT_VIDEO);
+    state.sdlWindow    = SDL_CreateWindow("trr", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, WIDTH, HEIGHT, 0);
+    state.sdlRenderer  = SDL_CreateRenderer(state.sdlWindow, -1, SDL_RENDERER_ACCELERATED);
+    state.sdlTexture   = SDL_CreateTexture(state.sdlRenderer, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_STREAMING, framebuffer.w, framebuffer.h);
+};
+
 int main(int argc, char** argv) {
     model_t model(PATH);
     framebuffer_t framebuffer(WIDTH, HEIGHT);
     framebuffer_t depthbuffer(WIDTH, HEIGHT);
     state_t state;
 
-    vec<int, 2> v = {12, 13};
-    mat<int, 2, 2> matrix;
-    matrix[0] = {1,0};
-    matrix[1] = {0,1};
-    v = matrix * v;
-
-    std::cout << v[0] << ' ' << v[1] << std::endl;
-
-    SDL_Init(SDL_INIT_VIDEO);
-    state.sdlWindow    = SDL_CreateWindow("trr", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, WIDTH, HEIGHT, 0);
-    state.sdlRenderer  = SDL_CreateRenderer(state.sdlWindow, -1, SDL_RENDERER_ACCELERATED);
-    state.sdlTexture   = SDL_CreateTexture(state.sdlRenderer, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_STREAMING, framebuffer.w, framebuffer.h);
-
     int t = omp_get_max_threads();
     std::cout << "system has " << t << " threads" << std::endl;
 
-    while(state.controls.running){
-        std::cout << '\r' << "ft: " << state.time.d.count() << " mS" << std::flush;
-        state.time.s = std::chrono::high_resolution_clock::now();
+    initWindow(state, framebuffer);
 
+    while(state.controls.running){
+        std::cout << '\r' << "ft: " << state.time.delta.count() << " mS" << std::flush;
+        state.time.start = std::chrono::high_resolution_clock::now();
         depthbuffer.clear();
         framebuffer.clear();
         getInput(state);
         drawModel(state, framebuffer, depthbuffer, model);
         showFramebuffer(state, framebuffer);
-
     } std::cout << std::endl << std::flush;
 
     SDL_DestroyTexture(state.sdlTexture);

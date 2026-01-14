@@ -3,18 +3,25 @@
 #include <array>
 #include <cmath>
 #include <concepts>
+#include <limits>
+#include <optional>
 
 template<typename T>
 concept integer =
     (std::integral<T> &&
-    !std::same_as<T, bool> &&
-    !std::same_as<T, char> &&
-    !std::same_as<T, signed char> &&
-    !std::same_as<T, unsigned char>)
+    !std::same_as<T, bool>)
     || std::floating_point<T>;
 
 template<integer T, std::size_t N> struct vec{
     std::array<T, N> data;
+
+    T x  = data[0];
+    T y  = data[1];
+    T z  = data[2];
+
+    T a  = data[0];
+    T b  = data[1];
+    T c  = data[2];
 
     constexpr const T& operator[](std::size_t n) const noexcept {
         return data[n];
@@ -104,12 +111,69 @@ template<integer T, std::size_t m, std::size_t n> struct mat{
         return u;
     }
 
-    constexpr mat<T, m, n> operator*(const mat<T, n, n>& b) const noexcept{
-        mat<T, m, n> c;
-        for(std::size_t i = {0uz}; i < m; i++){
-            for(std::size_t j = {0uz}; j < n; j++)
-                c[i][j] = (*this)[i][j].dot(b[i][j]);
-        }
+    template<std::size_t p>
+    constexpr mat<T, m, n> operator*(const mat<T, n, p>& b) const noexcept{
+        mat<T, m, p> c{};
+        for(std::size_t i{0uz}; i < m; i++)
+            for(std::size_t j{0uz}; j < p; j++){
+                T sum{};
+                for(std::size_t k{0uz}; k < n; k++)
+                    sum+= (*this)[i][k] * b[k][j];
+                c[i][j] = sum;
+            }
         return c;
+    }
+
+    constexpr mat<T, n, m> transpose() const noexcept{
+        mat<T, n, m> t{};
+        for(std::size_t i{0uz}; i < m; i++)
+            for(std::size_t j{0uz}; j < n; j++)
+                t[j][i] = (*this)[i][j];
+        return t;
+    }
+
+    std::optional<mat<T, m, n>> inverse() const requires (m == n && std::floating_point<T>){
+        mat<T, m, n> a = *this;
+        mat<T, m, n> inv{};
+        for(std::size_t i{0uz}; i < n; i++)
+            inv[i][i] = T{1};
+
+        const T eps = std::numeric_limits<T>::epsilon() * T{10};
+        for(std::size_t i{0uz}; i < n; i++){
+            std::size_t pivot = i;
+            T max = std::abs(a[i][i]);
+            for(std::size_t r{i + 1}; r < n; r++){
+                T val = std::abs(a[r][i]);
+                if(val > max){
+                    max = val;
+                    pivot = r;
+                }
+            }
+            if(max <= eps)
+                return std::nullopt;
+            if(pivot != i){
+                std::swap(a[i], a[pivot]);
+                std::swap(inv[i], inv[pivot]);
+            }
+
+            T inv_diag = T{1} / a[i][i];
+            for(std::size_t j{0uz}; j < n; j++){
+                a[i][j] *= inv_diag;
+                inv[i][j] *= inv_diag;
+            }
+
+            for(std::size_t r{0uz}; r < n; r++){
+                if(r == i)
+                    continue;
+                T factor = a[r][i];
+                if(factor == T{})
+                    continue;
+                for(std::size_t j{0uz}; j < n; j++){
+                    a[r][j] -= factor * a[i][j];
+                    inv[r][j] -= factor * inv[i][j];
+                }
+            }
+        }
+        return inv;
     }
 };
