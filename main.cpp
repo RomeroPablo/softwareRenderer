@@ -36,9 +36,11 @@ struct state {
         bool down = false;
         bool left = false;
         bool right = false;
+        bool ll = false;
+        bool lr = false;
     } controls;
 
-    vec<float, 4> camera{};
+    vec<float, 4> camera{0,0,1,0};
 
     struct {
         std::chrono::time_point<std::chrono::high_resolution_clock> start<%%>, end<%%>;
@@ -122,7 +124,7 @@ inline vec<int, 3> vmvp(vec<float, 3> a, vec<float, 4> camera){
     vec<float, 4> p = {a[0], a[1], a[2], 1};
 
     float xt = camera[0] * std::numbers::inv_pi;
-    float yt = camera[2] * std::numbers::inv_pi;
+    float yt = camera[1] * std::numbers::inv_pi;
 
     mat<float, 4, 4> rotX = {
          std::cos(xt), 0, std::sin(xt), 0,
@@ -139,8 +141,11 @@ inline vec<int, 3> vmvp(vec<float, 3> a, vec<float, 4> camera){
     };
 
     mat<float, 4, 4> rotation = rotX * rotY;
-
     p = rotation * p;
+
+    float zoom = camera[2]; // e.g. 1.0 = normal, >1 zoom in, <1 zoom out
+    p[0] *= zoom;
+    p[1] *= zoom;
 
     constexpr mat<float, 4, 4> viewport = {
         WIDTH/2.f,           0,          0,  WIDTH/2.f,
@@ -180,23 +185,34 @@ void getInput(state_t& state){
                 if (e.key.keysym.scancode == SDL_SCANCODE_S) state.controls.down  = true;
                 if (e.key.keysym.scancode == SDL_SCANCODE_A) state.controls.left  = true;
                 if (e.key.keysym.scancode == SDL_SCANCODE_D) state.controls.right = true;
+                if (e.key.keysym.scancode == SDL_SCANCODE_Q) state.controls.ll    = true;
+                if (e.key.keysym.scancode == SDL_SCANCODE_E) state.controls.lr    = true;
                 break;
             case SDL_KEYUP:
                 if (e.key.keysym.scancode == SDL_SCANCODE_W) state.controls.up    = false;
                 if (e.key.keysym.scancode == SDL_SCANCODE_S) state.controls.down  = false;
                 if (e.key.keysym.scancode == SDL_SCANCODE_A) state.controls.left  = false;
                 if (e.key.keysym.scancode == SDL_SCANCODE_D) state.controls.right = false;
+                if (e.key.keysym.scancode == SDL_SCANCODE_Q) state.controls.ll    = false;
+                if (e.key.keysym.scancode == SDL_SCANCODE_E) state.controls.lr    = false;
+
                 break;
             case SDL_WINDOWEVENT:
                 if (e.window.event == SDL_WINDOWEVENT_FOCUS_LOST){
-                    state.controls.up = state.controls.down = state.controls.left = state.controls.right = false; // drop stale key state when focus leaves
+                    state.controls.up = state.controls.down = 
+                    state.controls.left = state.controls.right = 
+                    state.controls.ll = state.controls.lr = false;
                 }
                 break;
             default: break;
         }
     }
-    if(state.controls.up)    state.camera[2] += 0.1;
-    if(state.controls.down)  state.camera[2] -= 0.1;
+    if(state.controls.lr)    state.camera[2] += 0.1;
+    if(state.controls.ll)    state.camera[2] -= 0.1;
+
+    if(state.controls.up)    state.camera[1] += 0.1;
+    if(state.controls.down)  state.camera[1] -= 0.1;
+
     if(state.controls.left)  state.camera[0] -= 0.1;
     if(state.controls.right) state.camera[0] += 0.1;
 }
