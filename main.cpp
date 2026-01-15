@@ -6,6 +6,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <iostream>
+#include <numbers>
 #include <omp.h>
 #include <string>
 #include <utility>
@@ -21,7 +22,7 @@ constexpr const char* PATH = "../assets/demon.obj";
 //constexpr const char* PATH = "../assets/dionysos.obj";
 constexpr uint16_t WIDTH  = 640;
 constexpr uint16_t HEIGHT = 480;
-constexpr uint16_t DEPTH  = 255;
+constexpr uint16_t DEPTH  = 128;
 
 using state_t =
 struct state { 
@@ -37,7 +38,7 @@ struct state {
         bool right = false;
     } controls;
 
-    vec<double, 3> camera;
+    vec<float, 4> camera{};
 
     struct {
         std::chrono::time_point<std::chrono::high_resolution_clock> start<%%>, end<%%>;
@@ -69,9 +70,9 @@ void raster(int ax, int ay, int bx, int by, int cx, int cy, framebuffer_t &frame
     if(cy != by){
         int base_height = by - cy;
         for(int y = cy; y < by; y++){
-            int x1 = cx + ((ax - cx)*(y - cy)) / total_height; // edge line lerp
+            int x1 = cx + ((ax - cx)*(y - cy)) / total_height;
             int x2 = cx + ((bx - cx)*(y - cy)) / base_height;
-            for(int x=std::min(x1,x2); x<std::max(x1,x2); x++) // draw horizontal line edge-to-edge
+            for(int x=std::min(x1,x2); x<std::max(x1,x2); x++)
                 framebuffer.set(x, y, color);
         }
     }
@@ -89,31 +90,27 @@ void raster(int ax, int ay, int bx, int by, int cx, int cy, framebuffer_t &frame
 
 
 double inline tArea(vec<int, 2> a, vec<int, 2> b, vec<int, 2> c){
-    return .5*((b.y-a.y)*(b.x+a.x) + (c.y-b.y)*(c.x+b.x) + (a.y-c.y)*(a.x+c.x));
+    return .5*((b[1]-a[1])*(b[0]+a[0]) + (c[1]-b[1])*(c[0]+b[0]) + (a[1]-c[1])*(a[0]+c[0]));
 }
 
-inline double hP(double x){ return std::clamp((x + 1.) * WIDTH /2, 0.0, double(WIDTH ));}
-inline double vP(double y){ return std::clamp((1. - y) * HEIGHT/2, 0.0, double(HEIGHT));}
-inline double dP(double z){ return std::clamp((z + 1.) * DEPTH /2, 0.0, double(DEPTH));}
-
 void rasterOMP(vec<int, 3> a, vec<int, 3> b, vec<int, 3> c, framebuffer_t& framebuffer, framebuffer_t& depthbuffer){
-    double area = tArea(vec<int, 2>{a.x, a.y}, vec<int, 2>{b.x, b.y}, vec<int, 2>{c.x, c.y});
+    double area = tArea(vec<int, 2>{a[0], a[1]}, vec<int, 2>{b[0], b[1]}, vec<int, 2>{c[0], c[1]});
     //if(area<1) return; // backface & area culling
 
-    int bbXMin = std::min(std::min(a.x, b.x), c.x);
-    int bbXMax = std::max(std::max(a.x, b.x), c.x);
-    int bbYMin = std::min(std::min(a.y, b.y), c.y);
-    int bbYMax = std::max(std::max(a.y, b.y), c.y);
+    int bbXMin = std::min(std::min(a[0], b[0]), c[0]);
+    int bbXMax = std::max(std::max(a[0], b[0]), c[0]);
+    int bbYMin = std::min(std::min(a[1], b[1]), c[1]);
+    int bbYMax = std::max(std::max(a[1], b[1]), c[1]);
 
 // #pragma omp parallel for // this kills perf
     for(int x = bbXMin; x < bbXMax; x++){
         for(int y = bbYMin; y < bbYMax; y++){
-            double α = tArea(vec<int, 2>{x, y}, vec<int, 2>{b.x, b.y}, vec<int, 2>{c.x, c.y}) / area;
-            double β = tArea(vec<int, 2>{x, y}, vec<int, 2>{c.x, c.y}, vec<int, 2>{a.x, a.y}) / area;
-            double γ = tArea(vec<int, 2>{x, y}, vec<int, 2>{a.x, a.y}, vec<int, 2>{b.x, b.y}) / area;
+            double α = tArea(vec<int, 2>{x, y}, vec<int, 2>{b[0], b[1]}, vec<int, 2>{c[0], c[1]}) / area;
+            double β = tArea(vec<int, 2>{x, y}, vec<int, 2>{c[0], c[1]}, vec<int, 2>{a[0], a[1]}) / area;
+            double γ = tArea(vec<int, 2>{x, y}, vec<int, 2>{a[0], a[1]}, vec<int, 2>{b[0], b[1]}) / area;
             if(α<0|| β<0|| γ<0) continue;
 
-            unsigned char z = static_cast<unsigned char>(α * a.z + β * b.z + γ * c.z);
+            unsigned char z = static_cast<unsigned char>(α * a[2] + β * b[2] + γ * c[2]);
             if(z <= depthbuffer.get(x, y)[0]) continue;
             depthbuffer.set(x, y, {z});
             framebuffer.set(x, y, {z, z, z});
@@ -121,16 +118,50 @@ void rasterOMP(vec<int, 3> a, vec<int, 3> b, vec<int, 3> c, framebuffer_t& frame
     }
 }
 
+inline vec<int, 3> vmvp(vec<float, 3> a, vec<float, 4> camera){
+    vec<float, 4> p = {a[0], a[1], a[2], 1};
+
+    float xR = camera[0] * std::numbers::inv_pi;
+    float yR = camera[2] * std::numbers::inv_pi;
+    mat<float, 4, 4> rotation = {
+     std::cos(xR),             0, std::sin(xR), 0,
+                0,             1,            0, 0,
+    -std::sin(xR),             0, std::cos(xR), 0,
+                0,             0,            0, 1,
+    };
+
+    /*
+    mat<float, 4, 4> rotation = {
+     std::cos(xR),             0, std::sin(xR), 0,
+                0,  std::cos(yR), std::sin(yR), 0,
+    -std::sin(xR), -std::sin(yR), std::cos(xR), 0,
+                0,             0,            0, 1,
+    };
+    */
+    p = rotation * p;
+
+    constexpr mat<float, 4, 4> viewport = {
+        WIDTH/2.f,           0,          0,  WIDTH/2.f,
+                0, -HEIGHT/2.f,          0, HEIGHT/2.f,
+                0,           0,  DEPTH/2.f,  DEPTH/2.f,
+                0,           0,          0,          1
+    };
+    p = viewport * p;
+
+    vec<int, 3> b;
+    b[0] = p[0];
+    b[1] = p[1];
+    b[2] = p[2];
+    return b;
+}
+
 void drawModel(state_t& state, framebuffer_t& framebuffer, framebuffer_t& depthbuffer, const model_t& model){
     for(const auto& f : model.faces){
-        int ax = hP(model.vertices[f.a-1].x + state.camera.x), ay = vP(model.vertices[f.a-1].y + state.camera.y);
-        int bx = hP(model.vertices[f.b-1].x + state.camera.x), by = vP(model.vertices[f.b-1].y + state.camera.y);
-        int cx = hP(model.vertices[f.c-1].x + state.camera.x), cy = vP(model.vertices[f.c-1].y + state.camera.y);
-        int az = dP(model.vertices[f.a-1].z + state.camera.z);
-        int bz = dP(model.vertices[f.b-1].z + state.camera.z);
-        int cz = dP(model.vertices[f.c-1].z + state.camera.z);
+        vec<int, 3> a = vmvp(model.vertices[f[0]-1], state.camera);
+        vec<int, 3> b = vmvp(model.vertices[f[1]-1], state.camera);
+        vec<int, 3> c = vmvp(model.vertices[f[2]-1], state.camera);
 
-        rasterOMP(vec<int, 3>{ax, ay, az}, vec<int, 3>{bx, by, bz}, vec<int, 3>{cx, cy, cz}, framebuffer, depthbuffer);
+        rasterOMP(a, b, c, framebuffer, depthbuffer);
     }
 }
 
@@ -162,10 +193,10 @@ void getInput(state_t& state){
             default: break;
         }
     }
-    if(state.controls.up)    state.camera.z += 0.1;
-    if(state.controls.down)  state.camera.z -= 0.1;
-    if(state.controls.left)  state.camera.x -= 0.1;
-    if(state.controls.right) state.camera.x += 0.1;
+    if(state.controls.up)    state.camera[2] += 0.1;
+    if(state.controls.down)  state.camera[2] -= 0.1;
+    if(state.controls.left)  state.camera[0] -= 0.1;
+    if(state.controls.right) state.camera[0] += 0.1;
 }
 
 void showFramebuffer(state_t& state, const framebuffer_t& fb) {

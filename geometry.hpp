@@ -15,14 +15,6 @@ concept integer =
 template<integer T, std::size_t N> struct vec{
     std::array<T, N> data;
 
-    T x  = data[0];
-    T y  = data[1];
-    T z  = data[2];
-
-    T a  = data[0];
-    T b  = data[1];
-    T c  = data[2];
-
     constexpr const T& operator[](std::size_t n) const noexcept {
         return data[n];
     }
