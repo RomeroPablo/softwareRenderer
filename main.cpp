@@ -17,8 +17,8 @@
 #include "model.hpp"
 
 constexpr const char* PATH = "../assets/demon.obj";
-//constexpr const char* PATH = "../assets/hunter.obj";
 //constexpr const char* PATH = "../assets/weep.obj";
+//constexpr const char* PATH = "../assets/hunter.obj";
 //constexpr const char* PATH = "../assets/dionysos.obj";
 constexpr uint16_t WIDTH  = 640;
 constexpr uint16_t HEIGHT = 480;
@@ -121,23 +121,25 @@ void rasterOMP(vec<int, 3> a, vec<int, 3> b, vec<int, 3> c, framebuffer_t& frame
 inline vec<int, 3> vmvp(vec<float, 3> a, vec<float, 4> camera){
     vec<float, 4> p = {a[0], a[1], a[2], 1};
 
-    float xR = camera[0] * std::numbers::inv_pi;
-    float yR = camera[2] * std::numbers::inv_pi;
-    mat<float, 4, 4> rotation = {
-     std::cos(xR),             0, std::sin(xR), 0,
-                0,             1,            0, 0,
-    -std::sin(xR),             0, std::cos(xR), 0,
-                0,             0,            0, 1,
+    float xt = camera[0] * std::numbers::inv_pi;
+    float yt = camera[2] * std::numbers::inv_pi;
+
+    mat<float, 4, 4> rotX = {
+         std::cos(xt), 0, std::sin(xt), 0,
+                    0, 1,            0, 0,
+        -std::sin(xt), 0, std::cos(xt), 0,
+                    0, 0,            0, 1,
     };
 
-    /*
-    mat<float, 4, 4> rotation = {
-     std::cos(xR),             0, std::sin(xR), 0,
-                0,  std::cos(yR), std::sin(yR), 0,
-    -std::sin(xR), -std::sin(yR), std::cos(xR), 0,
-                0,             0,            0, 1,
+    mat<float, 4, 4> rotY = {
+        1,             0,            0, 0,
+        0,  std::cos(yt), std::sin(yt), 0,
+        0, -std::sin(yt), std::cos(yt), 0,
+        0,             0,            0, 1,
     };
-    */
+
+    mat<float, 4, 4> rotation = rotX * rotY;
+
     p = rotation * p;
 
     constexpr mat<float, 4, 4> viewport = {
