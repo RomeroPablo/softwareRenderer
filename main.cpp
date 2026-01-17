@@ -17,8 +17,8 @@
 #include "geometry.hpp"
 #include "model.hpp"
 
-constexpr const char* PATH = "../assets/demon.obj";
-//constexpr const char* PATH = "../assets/weep.obj";
+//constexpr const char* PATH = "../assets/demon.obj";
+constexpr const char* PATH = "../assets/weep.obj";
 //constexpr const char* PATH = "../assets/dionysos.obj";
 //constexpr const char* PATH = "../assets/hunter.obj";
 constexpr uint16_t WIDTH  = 640;
@@ -35,16 +35,18 @@ struct state {
         bool running = true;
         bool up = false;
         bool down = false;
+        bool forward = false;
+        bool back = false;
         bool left = false;
         bool right = false;
-        bool ll = false;
-        bool lr = false;
+        bool leanLeft = false;
+        bool leanRight = false;
         int32_t sens = 35;
         int32_t yaw = 0;
         int32_t pitch = 0;
     } controls;
 
-    vec<float, 4> camera{0,0,1,0};
+    vec<float, 5> camera{0,0,1,0,0};
 
     struct {
         std::chrono::time_point<std::chrono::high_resolution_clock> start<%%>, end<%%>;
@@ -120,17 +122,16 @@ void rasterOMP(vec<int, 3> a, vec<int, 3> b, vec<int, 3> c, framebuffer_t& frame
             unsigned char z = static_cast<unsigned char>(α * a[2] + β * b[2] + γ * c[2]);
             if(z <= depthbuffer.get(x, y)[0]) continue;
             depthbuffer.set(x, y, {z});
-            framebuffer.set(x, y, {0,0,z});
+            framebuffer.set(x, y, {z,z,z});
         }
     }
 }
 
-inline vec<int, 3> mvpv(vec<float, 3> a, vec<float, 4> camera){
+inline vec<int, 3> mvpv(vec<float, 3> a, vec<float, 5> camera){
     vec<float, 4> p = {a[0], a[1], a[2], 1};
 
-    float xt = camera[0] * std::numbers::inv_pi;
-    float yt = camera[1] * std::numbers::inv_pi;
-    float zt = camera[2] * std::numbers::inv_pi;
+    float xt = camera[3] * 2 * std::numbers::pi / 360000; // yaw -- max is 360 000
+    float yt = camera[4] * 2 * std::numbers::pi / 89000;  // pitch -- max is 89 000
 
     mat<float, 4, 4> rotX = {
          std::cos(xt), 0, std::sin(xt), 0,
@@ -147,20 +148,20 @@ inline vec<int, 3> mvpv(vec<float, 3> a, vec<float, 4> camera){
     };
 
     mat<float, 4, 4> rotation = rotX * rotY;
-    p = rotation * p;
 
-    p[0] *= camera[2];
-    p[1] *= camera[2];
-
-    /*
-    mat<float, 4, 4> depth = {
-        1, 0, 0, 0,
-        0, 1, 0, 0,
-        0, 0, -1/camera[2], 0,
+    mat<float, 4, 4> translation = {
+        1, 0, 0, -camera[0],
+        0, 1, 0, -camera[1],
+        0, 0, 1, 0,
         0, 0, 0, 1,
     };
-    p = depth * p;
-    */
+
+    mat<float, 4, 4> depth = {
+        camera[2],         0, 0, 0,
+                0, camera[2], 0, 0,
+                0,         0, 1, 0,
+                0,         0, 0, 1,
+    };
 
     constexpr mat<float, 4, 4> viewport = {
         WIDTH/2.f,           0,          0,  WIDTH/2.f,
@@ -168,8 +169,11 @@ inline vec<int, 3> mvpv(vec<float, 3> a, vec<float, 4> camera){
                 0,           0,  DEPTH/2.f,  DEPTH/2.f,
                 0,           0,          0,          1
     };
-    p = viewport * p;
 
+    p = rotation * p;
+    p = translation * p;
+    p = depth * p;
+    p = viewport * p;
     return {static_cast<int>(p[0]), static_cast<int>(p[1]), static_cast<int>(p[2])};
 }
 
@@ -212,9 +216,9 @@ vec<int, 3> vC(vec<float, 3> a, vec<float, 4> camera){
 
 void drawModel(state_t& state, framebuffer_t& framebuffer, framebuffer_t& depthbuffer, const model_t& model){
     for(const auto& f : model.faces){
-        vec<int, 3> a = vC(model.vertices[f[0]-1], state.camera);
-        vec<int, 3> b = vC(model.vertices[f[1]-1], state.camera);
-        vec<int, 3> c = vC(model.vertices[f[2]-1], state.camera);
+        vec<int, 3> a = mvpv(model.vertices[f[0]-1], state.camera);
+        vec<int, 3> b = mvpv(model.vertices[f[1]-1], state.camera);
+        vec<int, 3> c = mvpv(model.vertices[f[2]-1], state.camera);
 
         rasterOMP(a, b, c, framebuffer, depthbuffer);
     }
@@ -229,20 +233,24 @@ void getInput(state_t& state){
                 break;
             case SDL_KEYDOWN:
                 if (e.key.keysym.sym == SDLK_ESCAPE) state.controls.running = false;
-                if (e.key.keysym.scancode == SDL_SCANCODE_W) state.controls.up    = true;
-                if (e.key.keysym.scancode == SDL_SCANCODE_S) state.controls.down  = true;
+                if (e.key.keysym.scancode == SDL_SCANCODE_W) state.controls.forward = true;
+                if (e.key.keysym.scancode == SDL_SCANCODE_S) state.controls.back  = true;
                 if (e.key.keysym.scancode == SDL_SCANCODE_A) state.controls.left  = true;
                 if (e.key.keysym.scancode == SDL_SCANCODE_D) state.controls.right = true;
-                if (e.key.keysym.scancode == SDL_SCANCODE_Q) state.controls.ll    = true;
-                if (e.key.keysym.scancode == SDL_SCANCODE_E) state.controls.lr    = true;
+                if (e.key.keysym.scancode == SDL_SCANCODE_SPACE) state.controls.up = true;
+                if (e.key.keysym.scancode == SDL_SCANCODE_LCTRL) state.controls.down = true;
+                if (e.key.keysym.scancode == SDL_SCANCODE_Q) state.controls.leanLeft    = true;
+                if (e.key.keysym.scancode == SDL_SCANCODE_E) state.controls.leanRight   = true;
                 break;
             case SDL_KEYUP:
-                if (e.key.keysym.scancode == SDL_SCANCODE_W) state.controls.up    = false;
-                if (e.key.keysym.scancode == SDL_SCANCODE_S) state.controls.down  = false;
+                if (e.key.keysym.scancode == SDL_SCANCODE_W) state.controls.forward = false;
+                if (e.key.keysym.scancode == SDL_SCANCODE_S) state.controls.back    = false;
                 if (e.key.keysym.scancode == SDL_SCANCODE_A) state.controls.left  = false;
                 if (e.key.keysym.scancode == SDL_SCANCODE_D) state.controls.right = false;
-                if (e.key.keysym.scancode == SDL_SCANCODE_Q) state.controls.ll    = false;
-                if (e.key.keysym.scancode == SDL_SCANCODE_E) state.controls.lr    = false;
+                if (e.key.keysym.scancode == SDL_SCANCODE_SPACE) state.controls.up = false;
+                if (e.key.keysym.scancode == SDL_SCANCODE_LCTRL) state.controls.down = false;
+                if (e.key.keysym.scancode == SDL_SCANCODE_Q) state.controls.leanLeft    = false;
+                if (e.key.keysym.scancode == SDL_SCANCODE_E) state.controls.leanRight   = false;
 
                 break;
             case SDL_MOUSEMOTION:
@@ -253,24 +261,25 @@ void getInput(state_t& state){
                 if (e.window.event == SDL_WINDOWEVENT_FOCUS_LOST){
                     state.controls.up = state.controls.down = 
                     state.controls.left = state.controls.right = 
-                    state.controls.ll = state.controls.lr = false;
+                    state.controls.leanLeft = state.controls.leanRight = false;
                     state.controls.yaw = state.controls.pitch = 0;
                 }
                 break;
             default: break;
         }
     }
-    if(state.controls.lr)    state.camera[2] += 0.1;
-    if(state.controls.ll)    state.camera[2] -= 0.1;
+    // yaw[3] and pitch[4]
+    state.camera[4] = state.controls.pitch;
+    state.camera[3] = state.controls.yaw;
+
+    if(state.controls.forward)  state.camera[2] += 0.1;
+    if(state.controls.back)     state.camera[2] -= 0.1;
 
     if(state.controls.up)    state.camera[1] += 0.1;
     if(state.controls.down)  state.camera[1] -= 0.1;
 
     if(state.controls.left)  state.camera[0] -= 0.1;
     if(state.controls.right) state.camera[0] += 0.1;
-
-    std::cout << "Yaw: " << state.controls.yaw << std::endl;
-    std::cout << "Pitch: " << state.controls.pitch << std::endl;
 }
 
 void showFramebuffer(state_t& state, const framebuffer_t& fb) {
