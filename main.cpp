@@ -12,17 +12,18 @@
 #include <utility>
 #include <vector>
 
+#include "SDL_mouse.h"
 #include "framebuffer.hpp"
 #include "geometry.hpp"
 #include "model.hpp"
 
 constexpr const char* PATH = "../assets/demon.obj";
 //constexpr const char* PATH = "../assets/weep.obj";
-//constexpr const char* PATH = "../assets/hunter.obj";
 //constexpr const char* PATH = "../assets/dionysos.obj";
+//constexpr const char* PATH = "../assets/hunter.obj";
 constexpr uint16_t WIDTH  = 640;
 constexpr uint16_t HEIGHT = 480;
-constexpr uint16_t DEPTH  = 128;
+constexpr uint16_t DEPTH  = 255;
 
 using state_t =
 struct state { 
@@ -38,6 +39,9 @@ struct state {
         bool right = false;
         bool ll = false;
         bool lr = false;
+        int32_t sens = 35;
+        int32_t yaw = 0;
+        int32_t pitch = 0;
     } controls;
 
     vec<float, 4> camera{0,0,1,0};
@@ -103,6 +107,7 @@ void rasterOMP(vec<int, 3> a, vec<int, 3> b, vec<int, 3> c, framebuffer_t& frame
     int bbXMax = std::max(std::max(a[0], b[0]), c[0]);
     int bbYMin = std::min(std::min(a[1], b[1]), c[1]);
     int bbYMax = std::max(std::max(a[1], b[1]), c[1]);
+    color_t col = {static_cast<uint8_t>(rand()%255),  static_cast<uint8_t>(rand()%255), static_cast<uint8_t>(rand()%255), static_cast<uint8_t>(rand()%255)};
 
 // #pragma omp parallel for // this kills perf
     for(int x = bbXMin; x < bbXMax; x++){
@@ -115,16 +120,17 @@ void rasterOMP(vec<int, 3> a, vec<int, 3> b, vec<int, 3> c, framebuffer_t& frame
             unsigned char z = static_cast<unsigned char>(α * a[2] + β * b[2] + γ * c[2]);
             if(z <= depthbuffer.get(x, y)[0]) continue;
             depthbuffer.set(x, y, {z});
-            framebuffer.set(x, y, {z, z, z});
+            framebuffer.set(x, y, {0,0,z});
         }
     }
 }
 
-inline vec<int, 3> vmvp(vec<float, 3> a, vec<float, 4> camera){
+inline vec<int, 3> mvpv(vec<float, 3> a, vec<float, 4> camera){
     vec<float, 4> p = {a[0], a[1], a[2], 1};
 
     float xt = camera[0] * std::numbers::inv_pi;
     float yt = camera[1] * std::numbers::inv_pi;
+    float zt = camera[2] * std::numbers::inv_pi;
 
     mat<float, 4, 4> rotX = {
          std::cos(xt), 0, std::sin(xt), 0,
@@ -143,9 +149,18 @@ inline vec<int, 3> vmvp(vec<float, 3> a, vec<float, 4> camera){
     mat<float, 4, 4> rotation = rotX * rotY;
     p = rotation * p;
 
-    float zoom = camera[2]; // e.g. 1.0 = normal, >1 zoom in, <1 zoom out
-    p[0] *= zoom;
-    p[1] *= zoom;
+    p[0] *= camera[2];
+    p[1] *= camera[2];
+
+    /*
+    mat<float, 4, 4> depth = {
+        1, 0, 0, 0,
+        0, 1, 0, 0,
+        0, 0, -1/camera[2], 0,
+        0, 0, 0, 1,
+    };
+    p = depth * p;
+    */
 
     constexpr mat<float, 4, 4> viewport = {
         WIDTH/2.f,           0,          0,  WIDTH/2.f,
@@ -155,18 +170,51 @@ inline vec<int, 3> vmvp(vec<float, 3> a, vec<float, 4> camera){
     };
     p = viewport * p;
 
-    vec<int, 3> b;
-    b[0] = p[0];
-    b[1] = p[1];
-    b[2] = p[2];
-    return b;
+    return {static_cast<int>(p[0]), static_cast<int>(p[1]), static_cast<int>(p[2])};
 }
+
+vec<int, 3> vC(vec<float, 3> a, vec<float, 4> camera){
+    vec<float, 4> p{a[0], a[1], a[2], 1};
+
+    mat<float, 4, 4> model = {
+        1, 0, 0, 0,
+        0, 1, 0, 0,
+        0, 0, 1, 0,
+        0, 0, 0, 1,
+    };
+
+    mat<float, 4, 4> view = {
+        1, 0, 0, 0,
+        0, 1, 0, 0,
+        0, 0, 1, 0,
+        0, 0, 0, 1,
+    };
+
+    float d = camera[2];
+    mat<float, 4, 4> projection= {
+        1, 0, 0, 0,
+        0, 1, 0, 0,
+        0, 0, 1, 0,
+        0, 0, 0, 1,
+    };
+
+    mat<float, 4, 4> viewport = {
+        WIDTH/2.f,           0,          0,  WIDTH/2.f,
+                0, -HEIGHT/2.f,          0, HEIGHT/2.f,
+                0,           0,  DEPTH/2.f,  DEPTH/2.f,
+                0,           0,          0,          1
+    };
+
+    p = viewport * (projection * (view * (model * p)));
+    return {static_cast<int>(p[0]), static_cast<int>(p[1]), static_cast<int>(p[2])};
+}
+
 
 void drawModel(state_t& state, framebuffer_t& framebuffer, framebuffer_t& depthbuffer, const model_t& model){
     for(const auto& f : model.faces){
-        vec<int, 3> a = vmvp(model.vertices[f[0]-1], state.camera);
-        vec<int, 3> b = vmvp(model.vertices[f[1]-1], state.camera);
-        vec<int, 3> c = vmvp(model.vertices[f[2]-1], state.camera);
+        vec<int, 3> a = vC(model.vertices[f[0]-1], state.camera);
+        vec<int, 3> b = vC(model.vertices[f[1]-1], state.camera);
+        vec<int, 3> c = vC(model.vertices[f[2]-1], state.camera);
 
         rasterOMP(a, b, c, framebuffer, depthbuffer);
     }
@@ -197,11 +245,16 @@ void getInput(state_t& state){
                 if (e.key.keysym.scancode == SDL_SCANCODE_E) state.controls.lr    = false;
 
                 break;
+            case SDL_MOUSEMOTION:
+                state.controls.pitch = std::clamp(state.controls.pitch + (e.motion.yrel * state.controls.sens), -89000, 89000);
+                state.controls.yaw = std::fmod((state.controls.yaw + (e.motion.xrel * state.controls.sens)),  360000);
+                break;
             case SDL_WINDOWEVENT:
                 if (e.window.event == SDL_WINDOWEVENT_FOCUS_LOST){
                     state.controls.up = state.controls.down = 
                     state.controls.left = state.controls.right = 
                     state.controls.ll = state.controls.lr = false;
+                    state.controls.yaw = state.controls.pitch = 0;
                 }
                 break;
             default: break;
@@ -215,6 +268,9 @@ void getInput(state_t& state){
 
     if(state.controls.left)  state.camera[0] -= 0.1;
     if(state.controls.right) state.camera[0] += 0.1;
+
+    std::cout << "Yaw: " << state.controls.yaw << std::endl;
+    std::cout << "Pitch: " << state.controls.pitch << std::endl;
 }
 
 void showFramebuffer(state_t& state, const framebuffer_t& fb) {
@@ -253,17 +309,17 @@ void initWindow(state_t& state, framebuffer_t& framebuffer){
 };
 
 int main(int argc, char** argv) {
+    state_t state;
     model_t model(PATH);
     framebuffer_t framebuffer(WIDTH, HEIGHT);
     framebuffer_t depthbuffer(WIDTH, HEIGHT);
-    state_t state;
 
     int t = omp_get_max_threads();
     std::cout << "system has " << t << " threads" << std::endl;
 
     initWindow(state, framebuffer);
-
     while(state.controls.running){
+        SDL_WarpMouseInWindow(state.sdlWindow, WIDTH/2, HEIGHT/2);
         std::cout << '\r' << "ft: " << state.time.delta.count() << " mS" << std::flush;
         state.time.start = std::chrono::high_resolution_clock::now();
         depthbuffer.clear();
