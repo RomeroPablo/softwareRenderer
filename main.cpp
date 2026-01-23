@@ -41,12 +41,20 @@ struct state {
         bool right = false;
         bool leanLeft = false;
         bool leanRight = false;
-        int32_t sens = 35;
-        int32_t yaw = 0;
-        int32_t pitch = 0;
+        int32_t yaw = 90;
+        int32_t pitch = -15;
+        int32_t sensitivity = 35;
     } controls;
 
-    vec<float, 5> camera{0,0,1,0,0};
+    struct {
+        vec<int, 3> position{};
+        vec<int, 3> forward{};
+        vec<int, 3> up{};
+        vec<int, 3> right{};
+        vec<int, 2> orientation{};
+    } camera;
+
+    mat<float, 4, 4> mvp;
 
     struct {
         std::chrono::time_point<std::chrono::high_resolution_clock> start<%%>, end<%%>;
@@ -127,9 +135,10 @@ void rasterOMP(vec<int, 3> a, vec<int, 3> b, vec<int, 3> c, framebuffer_t& frame
     }
 }
 
-inline vec<int, 3> mvpv(vec<float, 3> a, vec<float, 5> camera){
+inline vec<int, 3> mvpv(vec<float, 3> a, const mat<float, 4, 4>& mvp){
     vec<float, 4> p = {a[0], a[1], a[2], 1};
 
+    /*
     float xt = camera[3] * 2 * std::numbers::pi / 360000; // yaw -- max is 360 000
     float yt = camera[4] * 2 * std::numbers::pi / 89000;  // pitch -- max is 89 000
 
@@ -174,51 +183,15 @@ inline vec<int, 3> mvpv(vec<float, 3> a, vec<float, 5> camera){
     p = translation * p;
     p = depth * p;
     p = viewport * p;
+    */
     return {static_cast<int>(p[0]), static_cast<int>(p[1]), static_cast<int>(p[2])};
 }
-
-vec<int, 3> vC(vec<float, 3> a, vec<float, 4> camera){
-    vec<float, 4> p{a[0], a[1], a[2], 1};
-
-    mat<float, 4, 4> model = {
-        1, 0, 0, 0,
-        0, 1, 0, 0,
-        0, 0, 1, 0,
-        0, 0, 0, 1,
-    };
-
-    mat<float, 4, 4> view = {
-        1, 0, 0, 0,
-        0, 1, 0, 0,
-        0, 0, 1, 0,
-        0, 0, 0, 1,
-    };
-
-    float d = camera[2];
-    mat<float, 4, 4> projection= {
-        1, 0, 0, 0,
-        0, 1, 0, 0,
-        0, 0, 1, 0,
-        0, 0, 0, 1,
-    };
-
-    mat<float, 4, 4> viewport = {
-        WIDTH/2.f,           0,          0,  WIDTH/2.f,
-                0, -HEIGHT/2.f,          0, HEIGHT/2.f,
-                0,           0,  DEPTH/2.f,  DEPTH/2.f,
-                0,           0,          0,          1
-    };
-
-    p = viewport * (projection * (view * (model * p)));
-    return {static_cast<int>(p[0]), static_cast<int>(p[1]), static_cast<int>(p[2])};
-}
-
 
 void drawModel(state_t& state, framebuffer_t& framebuffer, framebuffer_t& depthbuffer, const model_t& model){
     for(const auto& f : model.faces){
-        vec<int, 3> a = mvpv(model.vertices[f[0]-1], state.camera);
-        vec<int, 3> b = mvpv(model.vertices[f[1]-1], state.camera);
-        vec<int, 3> c = mvpv(model.vertices[f[2]-1], state.camera);
+        vec<int, 3> a = mvpv(model.vertices[f[0]-1], state.mvp);
+        vec<int, 3> b = mvpv(model.vertices[f[1]-1], state.mvp);
+        vec<int, 3> c = mvpv(model.vertices[f[2]-1], state.mvp);
 
         rasterOMP(a, b, c, framebuffer, depthbuffer);
     }
@@ -254,8 +227,9 @@ void getInput(state_t& state){
 
                 break;
             case SDL_MOUSEMOTION:
-                state.controls.pitch = std::clamp(state.controls.pitch + (e.motion.yrel * state.controls.sens), -89000, 89000);
-                state.controls.yaw = std::fmod((state.controls.yaw + (e.motion.xrel * state.controls.sens)),  360000);
+                state.controls.pitch = std::clamp(state.controls.pitch + (e.motion.yrel * state.controls.sensitivity), 
+                        -89000, 89000);
+                state.controls.yaw = (state.controls.yaw + (e.motion.xrel * state.controls.sensitivity))%360000;
                 break;
             case SDL_WINDOWEVENT:
                 if (e.window.event == SDL_WINDOWEVENT_FOCUS_LOST){
@@ -268,18 +242,21 @@ void getInput(state_t& state){
             default: break;
         }
     }
-    // yaw[3] and pitch[4]
-    state.camera[4] = state.controls.pitch;
-    state.camera[3] = state.controls.yaw;
+}
 
-    if(state.controls.forward)  state.camera[2] += 0.1;
-    if(state.controls.back)     state.camera[2] -= 0.1;
+void updateCamera(state_t& state){
+    // at this point, we have our yaw and pitch
+    // we also have the requested change in our position
+    vec<double, 3> front = {
+        std::cos(state.controls.pitch),
 
-    if(state.controls.up)    state.camera[1] += 0.1;
-    if(state.controls.down)  state.camera[1] -= 0.1;
+    };
 
-    if(state.controls.left)  state.camera[0] -= 0.1;
-    if(state.controls.right) state.camera[0] += 0.1;
+}
+
+void updateMVP(state_t& state){
+
+
 }
 
 void showFramebuffer(state_t& state, const framebuffer_t& fb) {
@@ -334,6 +311,8 @@ int main(int argc, char** argv) {
         depthbuffer.clear();
         framebuffer.clear();
         getInput(state);
+        updateCamera(state);
+        updateMVP(state);
         drawModel(state, framebuffer, depthbuffer, model);
         showFramebuffer(state, framebuffer);
     } std::cout << std::endl << std::flush;
