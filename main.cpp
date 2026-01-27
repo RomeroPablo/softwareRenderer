@@ -25,6 +25,7 @@ constexpr uint16_t WIDTH  = 640;
 constexpr uint16_t HEIGHT = 480;
 constexpr uint16_t DEPTH  = 255;
 
+constexpr double aS = 1.0/1000.0;
 using state_t =
 struct state { 
     SDL_Window* sdlWindow;
@@ -41,8 +42,8 @@ struct state {
         bool right = false;
         bool leanLeft = false;
         bool leanRight = false;
-        int32_t yaw = 90;
-        int32_t pitch = -15;
+        int32_t yaw = 90000;    // θE3
+        int32_t pitch = -15000; // θE3
         int32_t sensitivity = 35;
     } controls;
 
@@ -247,15 +248,20 @@ void getInput(state_t& state){
 void updateCamera(state_t& state){
     // at this point, we have our yaw and pitch
     // we also have the requested change in our position
+    double pitch = state.controls.pitch/aS;
+    double yaw   = state.controls.yaw/aS;
+
     vec<double, 3> front = {
-        std::cos(state.controls.pitch),
-
+        std::cos(pitch) * std::cos(yaw),
+        std::cos(pitch) * std::sin(yaw),
+        std::sin(pitch)
     };
-
+    vec<int, 3> worldUp = { 0, 0, 1};
+    state.camera.forward = worldUp.cross(state.camera.right);
+    state.camera.right = state.camera.forward.cross(state.camera.up);
 }
 
 void updateMVP(state_t& state){
-
 
 }
 

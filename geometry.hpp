@@ -62,6 +62,16 @@ template<integer T, std::size_t N> struct vec{
         return dp;
     }
 
+    constexpr vec<T, 3> cross(const vec<T,3>& w) const noexcept {
+        if(N!=3) return vec<T, N>{};
+        vec<T, 3> cp = {
+            (*this)[1]*w[2] - (*this)[2]*w[1],
+            (*this)[0]*w[0] - (*this)[0]*w[2],
+            (*this)[0]*w[1] - (*this)[1]*w[0],
+        };
+        return cp;
+    }
+
     double angle(const vec<T,N>& w) const {
         return std::acos( std::clamp(this->dot(w) / (this->length() * w.length()), -1., 1.) );
     }
