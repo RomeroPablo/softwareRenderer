@@ -1,4 +1,5 @@
 #include <SDL2/SDL.h>
+#include <SDL_mouse.h>
 
 #include <algorithm>
 #include <cassert>
@@ -12,7 +13,6 @@
 #include <utility>
 #include <vector>
 
-#include "SDL_mouse.h"
 #include "framebuffer.hpp"
 #include "geometry.hpp"
 #include "model.hpp"
@@ -48,11 +48,11 @@ struct state {
     } controls;
 
     struct {
-        vec<int, 3> position{};
-        vec<int, 3> forward{};
-        vec<int, 3> up{};
-        vec<int, 3> right{};
-        vec<int, 2> orientation{};
+        vec<float, 3> position{};
+        vec<float, 3> forward{};
+        vec<float, 3> up{};
+        vec<float, 3> right{};
+        vec<float, 2> orientation{};
     } camera;
 
     mat<float, 4, 4> mvp;
@@ -138,53 +138,8 @@ void rasterOMP(vec<int, 3> a, vec<int, 3> b, vec<int, 3> c, framebuffer_t& frame
 
 inline vec<int, 3> mvpv(vec<float, 3> a, const mat<float, 4, 4>& mvp){
     vec<float, 4> p = {a[0], a[1], a[2], 1};
-
-    /*
-    float xt = camera[3] * 2 * std::numbers::pi / 360000; // yaw -- max is 360 000
-    float yt = camera[4] * 2 * std::numbers::pi / 89000;  // pitch -- max is 89 000
-
-    mat<float, 4, 4> rotX = {
-         std::cos(xt), 0, std::sin(xt), 0,
-                    0, 1,            0, 0,
-        -std::sin(xt), 0, std::cos(xt), 0,
-                    0, 0,            0, 1,
-    };
-
-    mat<float, 4, 4> rotY = {
-        1,             0,            0, 0,
-        0,  std::cos(yt), std::sin(yt), 0,
-        0, -std::sin(yt), std::cos(yt), 0,
-        0,             0,            0, 1,
-    };
-
-    mat<float, 4, 4> rotation = rotX * rotY;
-
-    mat<float, 4, 4> translation = {
-        1, 0, 0, -camera[0],
-        0, 1, 0, -camera[1],
-        0, 0, 1, 0,
-        0, 0, 0, 1,
-    };
-
-    mat<float, 4, 4> depth = {
-        camera[2],         0, 0, 0,
-                0, camera[2], 0, 0,
-                0,         0, 1, 0,
-                0,         0, 0, 1,
-    };
-
-    constexpr mat<float, 4, 4> viewport = {
-        WIDTH/2.f,           0,          0,  WIDTH/2.f,
-                0, -HEIGHT/2.f,          0, HEIGHT/2.f,
-                0,           0,  DEPTH/2.f,  DEPTH/2.f,
-                0,           0,          0,          1
-    };
-
-    p = rotation * p;
-    p = translation * p;
-    p = depth * p;
-    p = viewport * p;
-    */
+    // do something here actually ...
+    // just apply mvp matrices based on mvp :)
     return {static_cast<int>(p[0]), static_cast<int>(p[1]), static_cast<int>(p[2])};
 }
 
@@ -246,23 +201,43 @@ void getInput(state_t& state){
 }
 
 void updateCamera(state_t& state){
-    // at this point, we have our yaw and pitch
-    // we also have the requested change in our position
     double pitch = state.controls.pitch/aS;
     double yaw   = state.controls.yaw/aS;
-
     vec<double, 3> front = {
         std::cos(pitch) * std::cos(yaw),
         std::cos(pitch) * std::sin(yaw),
         std::sin(pitch)
     };
-    vec<int, 3> worldUp = { 0, 0, 1};
+    vec<float, 3> worldUp = {0.0f, 0.0f, 1.0f};
     state.camera.forward = worldUp.cross(state.camera.right);
     state.camera.right = state.camera.forward.cross(state.camera.up);
 }
 
 void updateMVP(state_t& state){
+    constexpr mat<float, 4, 4> idn = {
+         1,  0,  0,  0,
+         0,  1,  0,  0,
+         0,  0,  1,  0,
+         0,  0,  0,  1,
+    };
+    constexpr mat<float, 4, 4> rot = {
+         0, -1,  0,  0,
+         1,  0,  0,  0,
+         0,  0,  1,  0,
+         0,  0,  0,  1,
+    };
+    mat<float, 4, 4> model = idn * rot;
 
+    mat<float, 4, 4> view = {};
+    vec<float, 3> center = state.camera.position + state.camera.forward;
+    vec<float, 3> f = (center - state.camera.position);
+    f = f / f.length();
+    // center = (c.position + c.forward)
+    // view = lookat(c.position, center, c.up);
+
+    mat<float, 4, 4> proj = idn;
+
+    state.mvp = ((proj * view) * model);
 }
 
 void showFramebuffer(state_t& state, const framebuffer_t& fb) {
@@ -312,7 +287,7 @@ int main(int argc, char** argv) {
     initWindow(state, framebuffer);
     while(state.controls.running){
         SDL_WarpMouseInWindow(state.sdlWindow, WIDTH/2, HEIGHT/2);
-        std::cout << '\r' << "ft: " << state.time.delta.count() << " mS" << std::flush;
+        //std::cout << '\r' << "ft: " << state.time.delta.count() << " mS" << std::flush;
         state.time.start = std::chrono::high_resolution_clock::now();
         depthbuffer.clear();
         framebuffer.clear();

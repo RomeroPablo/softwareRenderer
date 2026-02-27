@@ -44,7 +44,14 @@ template<integer T, std::size_t N> struct vec{
         return u;
     }
 
-    double length() const {
+    constexpr vec<T, N> operator/(const T s) const noexcept {
+        vec<T, N> u{};
+        for(std::size_t i{0uz}; i < N; i++)
+            u[i] = (*this)[i] / s;
+        return u;
+    }
+
+    float length() const {
         T sum{};
         for(std::size_t i{0uz}; i < N; i++){
             T x = (*this)[i];
