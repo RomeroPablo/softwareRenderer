@@ -73,7 +73,7 @@ template<integer T, std::size_t N> struct vec{
         if(N!=3) return vec<T, N>{};
         vec<T, 3> cp = {
             (*this)[1]*w[2] - (*this)[2]*w[1],
-            (*this)[0]*w[0] - (*this)[0]*w[2],
+            (*this)[2]*w[0] - (*this)[0]*w[2],
             (*this)[0]*w[1] - (*this)[1]*w[0],
         };
         return cp;
