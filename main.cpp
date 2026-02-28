@@ -17,7 +17,7 @@
 #include "geometry.hpp"
 #include "model.hpp"
 
-//constexpr const char* PATH = "../assets/demon.obj";
+constexpr const char* PATH = "../assets/demon.obj";
 //constexpr const char* PATH = "../assets/weep.obj";
 //constexpr const char* PATH = "../assets/dionysos.obj";
 //constexpr const char* PATH = "../assets/hunter.obj";
