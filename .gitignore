@@ -1,5 +1,5 @@
 assets/*.obj
-artifacts/
+.artifacts/
 .cache/
 assets/david
 assets/grace

@@ -13,6 +13,7 @@
 #include <utility>
 #include <vector>
 
+#include "SDL_main.h"
 #include "framebuffer.hpp"
 #include "geometry.hpp"
 #include "model.hpp"
@@ -124,7 +125,7 @@ void rasterOMP(vec<int, 3> a, vec<int, 3> b, vec<int, 3> c, framebuffer_t& frame
     bbYMax = std::min(bbYMax, framebuffer.h - 1);
     if(bbXMin >= bbXMax || bbYMin >= bbYMax) return;
 
-// #pragma omp parallel for // this kills perf
+// #pragma omp parallel for // this kills perf, consider memory alignment and cache behavior
     for(int x = bbXMin; x < bbXMax; x++){
         for(int y = bbYMin; y < bbYMax; y++){
             double α = tArea(vec<int, 2>{x, y}, vec<int, 2>{b[0], b[1]}, vec<int, 2>{c[0], c[1]}) / area;
@@ -162,56 +163,28 @@ void drawModel(state_t& state, framebuffer_t& framebuffer, framebuffer_t& depthb
         vec<int, 3> b = mvpv(model.vertices[f[1]-1], state.mvp, state.width, state.height);
         vec<int, 3> c = mvpv(model.vertices[f[2]-1], state.mvp, state.width, state.height);
         if(a[0] < 0 || b[0] < 0 || c[0] < 0) continue;
-
         rasterOMP(a, b, c, framebuffer, depthbuffer);
     }
 }
 
 void getInput(state_t& state){
     SDL_Event e;
-    while (SDL_PollEvent(&e)){
-        switch (e.type){
-            case SDL_QUIT:
-                state.controls.running = false;
-                break;
-            case SDL_KEYDOWN:
-                if (e.key.keysym.sym == SDLK_ESCAPE) state.controls.running = false;
-                if (e.key.keysym.scancode == SDL_SCANCODE_W) state.controls.forward = true;
-                if (e.key.keysym.scancode == SDL_SCANCODE_S) state.controls.back  = true;
-                if (e.key.keysym.scancode == SDL_SCANCODE_A) state.controls.left  = true;
-                if (e.key.keysym.scancode == SDL_SCANCODE_D) state.controls.right = true;
-                if (e.key.keysym.scancode == SDL_SCANCODE_SPACE) state.controls.up = true;
-                if (e.key.keysym.scancode == SDL_SCANCODE_LCTRL) state.controls.down = true;
-                if (e.key.keysym.scancode == SDL_SCANCODE_Q) state.controls.leanLeft    = true;
-                if (e.key.keysym.scancode == SDL_SCANCODE_E) state.controls.leanRight   = true;
-                break;
-            case SDL_KEYUP:
-                if (e.key.keysym.scancode == SDL_SCANCODE_W) state.controls.forward = false;
-                if (e.key.keysym.scancode == SDL_SCANCODE_S) state.controls.back    = false;
-                if (e.key.keysym.scancode == SDL_SCANCODE_A) state.controls.left  = false;
-                if (e.key.keysym.scancode == SDL_SCANCODE_D) state.controls.right = false;
-                if (e.key.keysym.scancode == SDL_SCANCODE_SPACE) state.controls.up = false;
-                if (e.key.keysym.scancode == SDL_SCANCODE_LCTRL) state.controls.down = false;
-                if (e.key.keysym.scancode == SDL_SCANCODE_Q) state.controls.leanLeft    = false;
-                if (e.key.keysym.scancode == SDL_SCANCODE_E) state.controls.leanRight   = false;
+    while(SDL_PollEvent(&e));
+    const uint8_t* keys = SDL_GetKeyboardState(nullptr);
+    if(e.type == SDL_QUIT)          state.controls.running = false;
+    if (keys[SDLK_ESCAPE])          state.controls.running = false;
+    if (keys[SDL_SCANCODE_W])       state.controls.forward = true;
+    if (keys[SDL_SCANCODE_S])       state.controls.back  = true;
+    if (keys[SDL_SCANCODE_A])       state.controls.left  = true;
+    if (keys[SDL_SCANCODE_D])       state.controls.right = true;
+    if (keys[SDL_SCANCODE_SPACE])   state.controls.up = true;
+    if (keys[SDL_SCANCODE_LCTRL])   state.controls.down = true;
 
-                break;
-            case SDL_MOUSEMOTION:
-                state.controls.pitch = std::clamp(state.controls.pitch + (e.motion.yrel * state.controls.sensitivity), 
-                        -89000, 89000);
-                state.controls.yaw = (state.controls.yaw + (e.motion.xrel * state.controls.sensitivity))%360000;
-                break;
-            case SDL_WINDOWEVENT:
-                if (e.window.event == SDL_WINDOWEVENT_FOCUS_LOST){
-                    state.controls.up = state.controls.down = 
-                    state.controls.left = state.controls.right = 
-                    state.controls.leanLeft = state.controls.leanRight = false;
-                    state.controls.yaw = state.controls.pitch = 0;
-                }
-                break;
-            default: break;
-        }
-    }
+    int dx = 0, dy = 0;
+    SDL_GetRelativeMouseState(&dx, &dy);
+    state.controls.yaw   -= dx * 300;
+    state.controls.pitch -= dy * 300;
+    state.controls.pitch = std::clamp(state.controls.pitch, -89000, 89000);
 }
 
 void updateCamera(state_t& state){
@@ -234,20 +207,32 @@ void updateCamera(state_t& state){
     state.camera.up = state.camera.up / state.camera.up.length();
 
     vec<float, 3> move = {};
-    if(state.controls.left)
+    if(state.controls.left){
         move = move - state.camera.right;
-    if(state.controls.right)
+        state.controls.left = false;
+    }
+    if(state.controls.right){
         move = move + state.camera.right;
+        state.controls.right = false;
+    }
 
-    if(state.controls.forward)
+    if(state.controls.forward){
         move = move + state.camera.forward;
-    if(state.controls.back)
+        state.controls.forward = false;
+    }
+    if(state.controls.back){
         move = move - state.camera.forward;
+        state.controls.back = false;
+    }
 
-    if(state.controls.up)
+    if(state.controls.up){
         move = move + worldUp;
-    if(state.controls.down)
+        state.controls.up = false;
+    }
+    if(state.controls.down){
         move = move - worldUp;
+        state.controls.down = false;
+    }
 
     const float len = move.length();
     if(len > 0.0f){
@@ -311,29 +296,13 @@ void showFramebuffer(state_t& state, const framebuffer_t& fb) {
     state.time.delta = std::chrono::duration_cast<std::chrono::milliseconds>(state.time.end - state.time.start);
 }
 
-void benchmark(state_t& state){
-    framebuffer_t framebuffer(state.width, state.height);
-    std::chrono::time_point<std::chrono::high_resolution_clock> s<%%>, e<%%>;
-    s = std::chrono::high_resolution_clock::now();
-
-    std::srand(std::time({}));
-    for (int i={}; i<(1<<24); i++) {
-        vec<int, 2> a = {rand()%state.width, rand()%state.height};
-        vec<int, 2> b = {rand()%state.width, rand()%state.height};
-        line(a, b, framebuffer,
-        {static_cast<uint8_t>(rand()%255),  static_cast<uint8_t>(rand()%255), static_cast<uint8_t>(rand()%255), static_cast<uint8_t>(rand()%255)});
-    }
-    e = std::chrono::high_resolution_clock::now();
-    std::cout << "benchmark: " << std::chrono::duration_cast<std::chrono::microseconds>(e-s).count() << " μS" << std::endl;
-    std::cout << "terminating" << std::endl;
-    assert(0);
-}
-
 void initWindow(state_t& state, framebuffer_t& framebuffer){
+    SDL_SetMainReady();
     SDL_Init(SDL_INIT_VIDEO);
-    state.sdlWindow    = SDL_CreateWindow("trr", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, state.width, state.height, 0);
+    state.sdlWindow    = SDL_CreateWindow("Software Renderer", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, state.width, state.height, 0);
     state.sdlRenderer  = SDL_CreateRenderer(state.sdlWindow, -1, SDL_RENDERER_ACCELERATED);
     state.sdlTexture   = SDL_CreateTexture(state.sdlRenderer, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_STREAMING, framebuffer.w, framebuffer.h);
+    SDL_SetRelativeMouseMode(SDL_TRUE);
 };
 
 int main(int argc, char** argv) {
@@ -347,7 +316,6 @@ int main(int argc, char** argv) {
 
     initWindow(state, framebuffer);
     while(state.controls.running){
-        SDL_WarpMouseInWindow(state.sdlWindow, state.width/2, state.height/2);
         std::cout << '\r' << "ft: " << state.time.delta.count() << " mS" << std::flush;
         state.time.start = std::chrono::high_resolution_clock::now();
         depthbuffer.clear();
