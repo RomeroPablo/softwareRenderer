@@ -1,5 +1,5 @@
 #include <SDL2/SDL.h>
-#include <SDL_mouse.h>
+#include <SDL2/SDL_mouse.h>
 
 #include <algorithm>
 #include <cassert>
@@ -13,7 +13,7 @@
 #include <utility>
 #include <vector>
 
-#include "SDL_main.h"
+#include <SDL2/SDL_main.h>
 #include "framebuffer.hpp"
 #include "geometry.hpp"
 #include "model.hpp"
@@ -55,7 +55,7 @@ struct state {
         vec<float, 2> orientation{};
     } camera;
 
-    mat<float, 4, 4> mvp;
+    mat<float, 4, 4> mvp = {};
 
     struct {
         std::chrono::time_point<std::chrono::high_resolution_clock> start<%%>, end<%%>;
@@ -113,7 +113,7 @@ double inline tArea(vec<int, 2> a, vec<int, 2> b, vec<int, 2> c){
 void rasterOMP(vec<int, 3> a, vec<int, 3> b, vec<int, 3> c, framebuffer_t& framebuffer, framebuffer_t& depthbuffer){
     double area = tArea(vec<int, 2>{a[0], a[1]}, vec<int, 2>{b[0], b[1]}, vec<int, 2>{c[0], c[1]});
     if(std::abs(area) < 1e-6) return;
-    //if(area<1) return; // backface & area culling
+    if(area<1) return; // backface & area culling
 
     int bbXMin = std::min(std::min(a[0], b[0]), c[0]);
     int bbXMax = std::max(std::max(a[0], b[0]), c[0]);
@@ -124,6 +124,11 @@ void rasterOMP(vec<int, 3> a, vec<int, 3> b, vec<int, 3> c, framebuffer_t& frame
     bbYMin = std::max(bbYMin, 0);
     bbYMax = std::min(bbYMax, framebuffer.h - 1);
     if(bbXMin >= bbXMax || bbYMin >= bbYMax) return;
+    color_t col = {};
+    col[0] = rand()%255;
+    col[1] = rand()%255;
+    col[2] = rand()%255;
+    col[3] = 255;
 
 // #pragma omp parallel for // this kills perf, consider memory alignment and cache behavior
     for(int x = bbXMin; x < bbXMax; x++){
@@ -132,11 +137,14 @@ void rasterOMP(vec<int, 3> a, vec<int, 3> b, vec<int, 3> c, framebuffer_t& frame
             double β = tArea(vec<int, 2>{x, y}, vec<int, 2>{c[0], c[1]}, vec<int, 2>{a[0], a[1]}) / area;
             double γ = tArea(vec<int, 2>{x, y}, vec<int, 2>{a[0], a[1]}, vec<int, 2>{b[0], b[1]}) / area;
             if(α<0|| β<0|| γ<0) continue;
-
             unsigned char z = static_cast<unsigned char>(α * a[2] + β * b[2] + γ * c[2]);
+            col[0] = z;
+            col[1] = z;
+            col[2] = z;
+            col[3] = z;
             if(z <= depthbuffer.get(x, y)[0]) continue;
             depthbuffer.set(x, y, {z});
-            framebuffer.set(x, y, {z, z, z, 255});
+            framebuffer.set(x, y, col);
         }
     }
 }
@@ -145,7 +153,7 @@ inline vec<int, 3> mvpv(vec<float, 3> a, const mat<float, 4, 4>& mvp, int width,
     vec<float, 4> p = {a[0], a[1], a[2], 1};
     p  = mvp * p;
 
-    if(std::abs(p[3]) < 1e-6f) return {-1, -1, -1};
+    if(p[3] <= 1e-6f) return {-1, -1, -1};
     float ndcX = p[0] / p[3];
     float ndcY = p[1] / p[3];
     float ndcZ = p[2] / p[3];
@@ -249,9 +257,9 @@ void updateMVP(state_t& state){
          0,  0,  0,  1,
     };
     constexpr mat<float, 4, 4> rot = {
-         0, -1,  0,  0,
          1,  0,  0,  0,
-         0,  0,  1,  0,
+         0,  0, -1,  0,
+         0,  1,  0,  0,
          0,  0,  0,  1,
     };
     mat<float, 4, 4> model = idn * rot;
@@ -289,7 +297,7 @@ void showFramebuffer(state_t& state, const framebuffer_t& fb) {
 
     state.time.end = std::chrono::high_resolution_clock::now();
     const auto elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(state.time.end - state.time.start).count();
-    SDL_Delay(std::max(state.time.frameTime - static_cast<double>(elapsedMs), 0.0));
+    //SDL_Delay(std::max(state.time.frameTime - static_cast<double>(elapsedMs), 0.0));
 
     // delta is the full frame time (work + optional delay), used by input/movement.
     state.time.end = std::chrono::high_resolution_clock::now();
